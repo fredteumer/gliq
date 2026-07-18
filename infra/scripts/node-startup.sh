@@ -15,6 +15,7 @@
 #   __SECRET_NAME__      Secret Manager secret holding the auth key
 #   __HOSTNAME__         tailnet hostname for this node
 #   __EXTRA_TS_FLAGS__   per-node `tailscale up` flags (routes, tags)
+#   __ADMIN_USER__       local account Tailscale SSH maps the admin identity to
 
 set -euo pipefail
 
@@ -128,7 +129,45 @@ else
 fi
 
 #-----------------------------------------------------------------------------
-# 4. Application layout
+# 4. Users
+#-----------------------------------------------------------------------------
+# Tailscale SSH maps a tailnet identity onto a LOCAL UNIX ACCOUNT, defaulting to
+# the client's own username. A stock Debian image has no such account, so SSH
+# fails with:
+#     tailscale: failed to look up local user "<you>"
+# even though the node is perfectly reachable.
+#
+# The admin account is generic (`admin`) rather than personal, so connect with
+# `ssh admin@<host>` or put this in your ~/.ssh/config:
+#     Host gliq-*
+#         User admin
+
+echo "👤 Creating admin user __ADMIN_USER__..."
+if ! id -u "__ADMIN_USER__" >/dev/null 2>&1; then
+    useradd --create-home --shell /bin/bash "__ADMIN_USER__"
+fi
+usermod -aG sudo "__ADMIN_USER__"
+
+# Passwordless sudo: the account has no password at all (authentication happens
+# at the tailnet layer via Tailscale SSH), so a sudo password prompt would be
+# unanswerable rather than secure.
+cat > /etc/sudoers.d/90-gliq-admin <<EOF
+__ADMIN_USER__ ALL=(ALL) NOPASSWD:ALL
+EOF
+chmod 0440 /etc/sudoers.d/90-gliq-admin
+visudo -c -f /etc/sudoers.d/90-gliq-admin >/dev/null
+
+# Unprivileged service account for the component processes. No login shell —
+# it exists to own /opt/gliq and to be the systemd unit's User=.
+echo "👤 Creating service user gliq..."
+if ! id -u gliq >/dev/null 2>&1; then
+    useradd --system --home-dir /opt/gliq --shell /usr/sbin/nologin gliq
+fi
+
+echo "✅ Users ready: $(id -un __ADMIN_USER__), $(id -un gliq)"
+
+#-----------------------------------------------------------------------------
+# 5. Application layout
 #-----------------------------------------------------------------------------
 # /etc/gliq holds the systemd EnvironmentFile, generated from stack outputs by
 #   python3 infra/env-from-stack.py --target /etc/gliq/gliq.env --no-secrets
@@ -136,7 +175,50 @@ fi
 # would drift from the Pulumi stack.
 
 echo "📁 Preparing /opt/gliq and /etc/gliq..."
-install -d -m 0755 -o root -g root /opt/gliq
-install -d -m 0750 -o root -g root /etc/gliq
+# Owned by the service user: the component runs as `gliq`, not root.
+install -d -m 0755 -o gliq -g gliq /opt/gliq
+# Env file holds credentials — readable by the service user, nobody else.
+install -d -m 0750 -o root -g gliq /etc/gliq
+
+#-----------------------------------------------------------------------------
+# 6. Shell prompt
+#-----------------------------------------------------------------------------
+# Matches Fred's local prompt so a VM shell reads the same as a laptop shell —
+# which matters most when several terminals are open at once and it needs to be
+# obvious at a glance which host a command is about to run on.
+
+echo "🎨 Installing shell prompt..."
+
+# Quoted heredoc: everything below must reach the file LITERALLY. In particular
+# $(date ...) has to survive as-is so it re-evaluates on every prompt render
+# rather than freezing the boot time into the prompt.
+cat > /etc/gliq-prompt.sh <<'PROMPT_EOF'
+# GreenlightIQ shell prompt — installed by infra/scripts/node-startup.sh
+# set custom prompt
+# datetime, user@host, full path
+PS1='\n\[\e[0;37m\]┌─[\[\e[1;33m\]$(date "+%Y-%m-%d %H:%M:%S")\[\e[0;37m\]]'
+PS1+=' \[\e[0;37m\][\[\e[1;32m\]\u\[\e[1;34m\]@\[\e[1;32m\]\h\[\e[0;37m\]]'
+PS1+=' \[\e[0;37m\][\[\e[1;33m\]\w\[\e[0;37m\]]\n'
+PS1+='\[\e[0;37m\]└─\[\e[1;31m\]$ \[\e[0m\]'
+PROMPT_EOF
+chmod 0644 /etc/gliq-prompt.sh
+
+# Sourced from ~/.bashrc rather than /etc/profile.d: Debian's default .bashrc
+# assigns PS1 itself, and for an interactive SSH shell it runs *after*
+# profile.d — so a prompt set there would be silently overwritten. Appending
+# here means ours is the last assignment to win.
+SOURCE_LINE='[ -r /etc/gliq-prompt.sh ] && . /etc/gliq-prompt.sh'
+for rc in /root/.bashrc "/home/__ADMIN_USER__/.bashrc" /etc/skel/.bashrc; do
+    [ -e "${rc}" ] || continue
+    # Guarded so re-running the bootstrap doesn't stack duplicate lines.
+    if ! grep -qF '/etc/gliq-prompt.sh' "${rc}"; then
+        printf '\n# GreenlightIQ prompt\n%s\n' "${SOURCE_LINE}" >> "${rc}"
+        echo "   added to ${rc}"
+    else
+        echo "   already present in ${rc}"
+    fi
+done
+
+echo "✅ Prompt installed"
 
 echo "🎯 Bootstrap complete at $(date -Is)"

@@ -53,6 +53,15 @@ export interface ComputeArgs {
     machineType: string;
     /** Tailscale ACL tag, e.g. `tag:gliq`. Empty = untagged (see secrets.ts). */
     tailscaleTag: string;
+    /**
+     * Local account Tailscale SSH maps the admin identity onto.
+     *
+     * Tailscale SSH uses the *connecting* user's name unless one is given
+     * explicitly, so a generic `admin` requires either `ssh admin@<host>` or a
+     * `Host gliq-* / User admin` block in the operator's ~/.ssh/config. Set it
+     * to your own username instead if you prefer bare `ssh <host>`.
+     */
+    adminUser: string;
     network: NetworkingResources;
     accounts: ComponentAccounts;
     secrets: SecretResources;
@@ -60,7 +69,8 @@ export interface ComputeArgs {
 }
 
 export function createCompute(args: ComputeArgs): ComputeResources {
-    const { project, zone, machineType, tailscaleTag, network, accounts, secrets, apis } = args;
+    const { project, zone, machineType, tailscaleTag, adminUser, network, accounts, secrets, apis } =
+        args;
 
     const template = fs.readFileSync(
         path.join(__dirname, "..", "scripts", "node-startup.sh"),
@@ -84,6 +94,7 @@ export function createCompute(args: ComputeArgs): ComputeResources {
                 .replace(/__PROJECT__/g, project)
                 .replace(/__SECRET_NAME__/g, secretName)
                 .replace(/__HOSTNAME__/g, hostname)
+                .replace(/__ADMIN_USER__/g, adminUser)
                 .replace(/__EXTRA_TS_FLAGS__/g, flags.join(" \\\n    "));
         });
 

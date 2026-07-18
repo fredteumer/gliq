@@ -31,6 +31,7 @@ Optional, with defaults:
 | Key | Default | Notes |
 | :--- | :--- | :--- |
 | `machineType` | `e2-small` | Applies to all three VMs |
+| `adminUser` | `admin` | Local account created on every VM for administration. ⚠️ Tailscale SSH maps to the **connecting client's** username, so `ssh <host>` alone looks for a local account named after *you*. Either connect as `ssh admin@<host>`, add a `Host gliq-*` → `User admin` block to `~/.ssh/config`, or set this key to your own username. |
 | `tailscaleTag` | *(unset)* | e.g. `tag:gliq`. ⚠️ An **untagged** key mints nodes that authenticate as the key's owner; under Tailscale's default allow-all ACL such a node can reach every device on the tailnet. Setting a tag scopes them to a machine identity instead. `tailscale up` fails if the key is not authorised for the tag, so mint the key with it. |
 | `topicScoringRequested` etc. | see `index.ts` | Pub/Sub resource names |
 

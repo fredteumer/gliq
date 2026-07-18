@@ -76,6 +76,15 @@ const compute = createCompute({
     // Empty until a tagged Tailscale key exists. See core/secrets.ts for why
     // this matters more than where the key is stored.
     tailscaleTag: config.get("tailscaleTag") ?? "",
+    // A generic account rather than a personal one, so it stays correct
+    // regardless of who administers the box.
+    //
+    // ⚠️ Tailscale SSH maps a tailnet identity onto a local account named after
+    // the *connecting* user, so bare `ssh gliq-intake` looks for a local `ft`
+    // and fails. Either use `ssh admin@gliq-intake`, or add to ~/.ssh/config:
+    //     Host gliq-*
+    //         User admin
+    adminUser: config.get("adminUser") ?? "admin",
     network,
     accounts,
     secrets,
