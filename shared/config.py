@@ -30,6 +30,10 @@ class Config:
     sub_scoring_requested: str
     topic_scoring_completed: str
     sub_scoring_completed: str
+    dead_letter_topic: str
+
+    #: Where Component C writes rendered reports and A reads them back.
+    artifacts_bucket: str
 
     db_host: str
     db_port: int
@@ -52,6 +56,8 @@ class Config:
             sub_scoring_requested=os.getenv("PUBSUB_SUB_SCORING_REQUESTED", "scoring-requested-sub"),
             topic_scoring_completed=os.getenv("PUBSUB_TOPIC_SCORING_COMPLETED", "scoring-completed"),
             sub_scoring_completed=os.getenv("PUBSUB_SUB_SCORING_COMPLETED", "scoring-completed-sub"),
+            dead_letter_topic=os.getenv("PUBSUB_DEAD_LETTER_TOPIC", "gliq-dead-letter"),
+            artifacts_bucket=os.getenv("GCS_ARTIFACTS_BUCKET", ""),
             db_host=os.getenv("DB_HOST", "127.0.0.1"),
             db_port=int(os.getenv("DB_PORT", "5432")),
             db_name=os.getenv("DB_NAME", "greenlightiq"),

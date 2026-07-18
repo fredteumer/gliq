@@ -91,12 +91,43 @@ docs/                                    # ARCHITECTURE, DEPLOYMENT, SCREENSHOTS
 
 - **Documentation is graded, and heavily.** The assignment requires enough screenshots to prove the system works. Keep `docs/SCREENSHOTS.md` current as features land rather than reconstructing evidence at the end.
 - **Markdown prose is not hard-wrapped.** Write each sentence or bullet on one flowing line; break only where it is semantically meaningful.
-- Use the [EMOJIDICT](#emojidict) below consistently in status updates, summaries, and docs.
+- **Use emojis liberally**, per the [EMOJIDICT](#-emojidict) below — in docs, status updates, summaries, commit-adjacent notes, and in **script and CLI output**. A wall of undifferentiated prose is harder to scan than the same content with a ✅ / ⚠️ / 🛑 down the left edge, and the assignment is graded partly on how legibly the system explains itself.
+- Emojis carry meaning, so **never improvise a synonym**. If you need one the table lacks, add a row to the EMOJIDICT rather than inventing a one-off — two symbols for one concept is worse than none.
+- The same applies to tooling: a script that reports status should mark it (`✅ wrote 9 variables`, `⚠️ GCP_PROJECT_ID is also set outside the managed block`), not print bare sentences.
 
 ### Licensing
 
 - **AGPLv3.** Chosen deliberately: the project is a network service, and AGPL §13 closes the SaaS loophole that GPLv3 leaves open, preserving a future dual-licensing/commercial option.
 - ⚠️ Copyright must stay solely with the author for that option to remain viable. A **CLA is required before accepting any external contribution** — retrofitting one later means chasing down every past contributor.
+
+## 🔄 Session continuity (WIP files)
+
+We carry context across sessions with **WIP files at the repo root**, mirroring the `../manna` and `../grove` convention.
+
+⚠️ One adaptation: `manna` is an umbrella directory holding subrepos, so its WIP files naturally sit outside any git tree. `gliq` is itself a single repo, so **WIP files here are gitignored** (`WIP*.md`). They are local working memory, not a deliverable — never commit them, and never let them substitute for documentation that belongs in `docs/`.
+
+**At the start of any session: check for the most recent `WIP-YYYY-MM-DD.md` and read it first** — it is the handoff from the previous session.
+
+- **`WIP-YYYY-MM-DD.md`** — dated session snapshot/handoff. One per session: scope, what got done (with file paths / commit refs), context & decisions, blockers, and a prioritized TODO for next time. These accumulate; don't delete old ones.
+- **`WIP.md`** (undated, optional) — a rolling doc for a single active workstream once we commit to a specific feature/fix.
+
+When picking work back up, start a **new** dated file rather than editing an old one; reference the prior file if continuing the same thread.
+
+**Format (terse — bullets, not prose).** End each session by pruning the day's file down to exactly this shape:
+
+```
+CURRENT TASK:
+<one- or two-line summary of the active thread>
+
+TODO:
+- x - brief summary
+- y - brief summary
+
+DONE IN SESSION:
+- a ✅ - very brief summary
+```
+
+A WIP is a **handoff, not a journal**. Scratch notes during a session are fine; before closing out, collapse to the above. Move durable architecture and decisions into `AGENTS.md` or `docs/` rather than letting them accrete in WIP files — a decision recorded only in a gitignored file is a decision that is lost.
 
 ## ⚠️ Git
 
@@ -110,14 +141,29 @@ docs/                                    # ARCHITECTURE, DEPLOYMENT, SCREENSHOTS
 - Prefer flagging a constraint conflict over silently working around it.
 - Generated artifacts (reports, `__pycache__/`, `*.zip`, Pulumi outputs) belong in `.gitignore`.
 
-## EMOJIDICT
+## ✨ EMOJIDICT
+
+This table is **authoritative**. Use it liberally and consistently; add a row when you introduce a new emoji rather than improvising a synonym for one already here.
+
+> 📝 Sibling repo `ponder-the-orb` keeps an equivalent legend. The sets are deliberately close so moving between them is frictionless — the one divergence is in-progress, which is 🚧 here and 🛫 there.
+
+**Status markers** — use these when writing any checklist or status table:
 
 | Emoji | Meaning |
 | :---: | :--- |
-| ✅ | Done / passing / success |
+| ✅ | Done / passing / verified |
+| 🚧 | In progress / under construction |
+| ⚪ | TODO — not started |
+| ⏸️ | Paused / parked / deferred |
+| ⛔ | Not doing / out of scope (always give the reason) |
+| ⏳ | Deferred-but-required — captured now, activated later |
+
+**Everything else:**
+
+| Emoji | Meaning |
+| :---: | :--- |
 | ❌ | Failed / error / broken |
 | ⚠️ | Warning / caution / needs attention |
-| 🚧 | Work in progress / under construction |
 | 🛑 | Stop / blocked / do not proceed |
 | ➡️ | Go to / see / next step / reference |
 | 💡 | Idea / suggestion / tip |
