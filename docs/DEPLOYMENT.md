@@ -9,9 +9,35 @@
 - Tailscale account (admin access to the VMs)
 - DNS control for `fredt.io` (A record for `greenlightiq`)
 
+## 🔒 Required stack config
+
+`Pulumi.dev.yaml` is **gitignored** — it carries `--secret` values encrypted with the stack passphrase, and a weak passphrase in a public AGPL repo is a published secret. A fresh clone must therefore recreate stack config by hand:
+
+```bash
+cd infra
+pulumi stack init dev
+pulumi config set gcp:project  <project-id>
+pulumi config set gcp:region   us-central1
+pulumi config set gcp:zone     us-central1-a
+
+# Tailscale key from https://login.tailscale.com/admin/settings/keys
+# Must be REUSABLE — three VMs register with it. Ephemeral is recommended so
+# nodes deregister themselves when a VM is destroyed.
+pulumi config set --secret tailscaleAuthKey  tskey-auth-...
+```
+
+Optional, with defaults:
+
+| Key | Default | Notes |
+| :--- | :--- | :--- |
+| `machineType` | `e2-small` | Applies to all three VMs |
+| `tailscaleTag` | *(unset)* | e.g. `tag:gliq`. ⚠️ An **untagged** key mints nodes that authenticate as the key's owner; under Tailscale's default allow-all ACL such a node can reach every device on the tailnet. Setting a tag scopes them to a machine identity instead. `tailscale up` fails if the key is not authorised for the tag, so mint the key with it. |
+| `topicScoringRequested` etc. | see `index.ts` | Pub/Sub resource names |
+
 ## Outline
 
-1. **Provision** — `cd infra/pulumi && pulumi up`. Creates Pub/Sub topics and subscriptions, Cloud SQL (PostgreSQL), Memorystore (Redis), three VMs, service accounts, and firewall rules.
+1. **Provision** — `cd infra && pulumi up`. Creates Pub/Sub topics and subscriptions, three VMs, service accounts, firewall rules, the artifact bucket, and (in a later pass) Cloud SQL and Memorystore.
+2. **Sync config** — `python3 infra/env-from-stack.py` writes stack outputs into `.env`. Re-run after **every** `pulumi up`, or the components point at stale resource names.
 2. **Join the tailnet** — each VM joins Tailscale; public SSH stays closed.
 3. **Load the corpus** — `data/etl` fetches the Steam dataset and loads it into Cloud SQL. The dataset is not committed to this repository.
 4. **Deploy the components** — install per-component dependencies and enable the systemd units in `infra/systemd`.

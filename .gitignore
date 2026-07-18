@@ -25,9 +25,12 @@ reports/
 !docs/**/*.pdf
 
 # Pulumi
-# Stack config IS committed: secret values are encrypted with the stack's
-# passphrase, and without it the stack is not reproducible from the repo.
-# Never `pulumi config set` a secret without the --secret flag.
+# Stack config is NOT committed. It holds `pulumi config set --secret` values
+# (currently the Tailscale auth key) encrypted with the stack passphrase — and
+# a weak passphrase in a public AGPL repo is a published secret. Reproducibility
+# is handled by documenting required config keys in docs/DEPLOYMENT.md instead.
+Pulumi.*.yaml
+!Pulumi.yaml
 .pulumi/
 
 # Node (infra/pulumi)
