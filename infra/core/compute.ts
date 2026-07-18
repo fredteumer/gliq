@@ -102,6 +102,24 @@ export function createCompute(args: ComputeArgs): ComputeResources {
         secrets.tailscaleAuthKey,
     ];
 
+    /**
+     * Shared instance options.
+     *
+     * The bootstrap script goes in `metadata["startup-script"]` rather than the
+     * `metadataStartupScript` convenience field: the latter is ForceNew, so
+     * every edit to the script would destroy and recreate all three VMs. The
+     * metadata map is updatable in place — edit the script, `pulumi up`, then
+     * reset the instance to re-run it. (GCE runs startup scripts on *every*
+     * boot, not just the first.)
+     *
+     * `resourceManagerTags` is ignored because the provider reports it as a
+     * null addition we never set, and any bootDisk diff triggers replacement.
+     */
+    const instanceOpts: pulumi.CustomResourceOptions = {
+        dependsOn,
+        ignoreChanges: ["bootDisk.initializeParams.resourceManagerTags"],
+    };
+
     // --- Component A — the only publicly reachable node ---------------------
     const intake = new gcp.compute.Instance(
         "vm-intake",
@@ -120,7 +138,7 @@ export function createCompute(args: ComputeArgs): ComputeResources {
                 },
             ],
             tags: [TAG_PUBLIC, TAG_INTERNAL],
-            metadataStartupScript: startupScript("gliq-intake", []),
+            metadata: { "startup-script": startupScript("gliq-intake", []) },
             serviceAccount: {
                 email: accounts.intake.email,
                 scopes: ["https://www.googleapis.com/auth/cloud-platform"],
@@ -128,7 +146,7 @@ export function createCompute(args: ComputeArgs): ComputeResources {
             labels: { component: "intake", project: "greenlightiq" },
             allowStoppingForUpdate: true,
         },
-        { dependsOn },
+        instanceOpts,
     );
 
     // --- Component B — no external IP; advertises the subnet ----------------
@@ -151,9 +169,11 @@ export function createCompute(args: ComputeArgs): ComputeResources {
             // Required for subnet routing; without it advertised routes silently
             // fail to carry traffic.
             canIpForward: true,
-            metadataStartupScript: startupScript("gliq-scoring", [
-                `--advertise-routes=${SUBNET_CIDR}`,
-            ]),
+            metadata: {
+                "startup-script": startupScript("gliq-scoring", [
+                    `--advertise-routes=${SUBNET_CIDR}`,
+                ]),
+            },
             serviceAccount: {
                 email: accounts.scoring.email,
                 scopes: ["https://www.googleapis.com/auth/cloud-platform"],
@@ -161,7 +181,7 @@ export function createCompute(args: ComputeArgs): ComputeResources {
             labels: { component: "scoring", project: "greenlightiq" },
             allowStoppingForUpdate: true,
         },
-        { dependsOn },
+        instanceOpts,
     );
 
     // --- Component C — no external IP ---------------------------------------
@@ -180,7 +200,7 @@ export function createCompute(args: ComputeArgs): ComputeResources {
                 },
             ],
             tags: [TAG_INTERNAL],
-            metadataStartupScript: startupScript("gliq-report", []),
+            metadata: { "startup-script": startupScript("gliq-report", []) },
             serviceAccount: {
                 email: accounts.report.email,
                 scopes: ["https://www.googleapis.com/auth/cloud-platform"],
@@ -188,7 +208,7 @@ export function createCompute(args: ComputeArgs): ComputeResources {
             labels: { component: "report", project: "greenlightiq" },
             allowStoppingForUpdate: true,
         },
-        { dependsOn },
+        instanceOpts,
     );
 
     return {

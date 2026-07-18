@@ -31,16 +31,24 @@ echo "🚀 GreenlightIQ node bootstrap starting at $(date -Is)"
 # can take a moment longer than the boot sequence. Downloading anything before
 # it is ready fails the whole script.
 
-echo "⏳ Waiting for network..."
-MAX_ATTEMPTS=30
+# Probe the exact resource the next step needs, and one that returns HTTP 200.
+# ⚠️ `curl -f` exits non-zero on any status >= 400, so a URL that 404s on `/`
+# can never satisfy this loop however healthy the network is — that mistake
+# failed every node's first boot.
+PROBE_URL="https://tailscale.com/install.sh"
+
+echo "⏳ Waiting for network (probing ${PROBE_URL})..."
+MAX_ATTEMPTS=45
 ATTEMPT=0
-until curl -fsS --max-time 5 https://packages.cloud.google.com >/dev/null 2>&1; do
+until curl -fsS --max-time 5 -o /dev/null "${PROBE_URL}"; do
+    CURL_EXIT=$?
     ATTEMPT=$((ATTEMPT + 1))
     if [ "$ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
-        echo "❌ Network not ready after ${MAX_ATTEMPTS} attempts — aborting"
+        echo "❌ Network not ready after ${MAX_ATTEMPTS} attempts (curl exit ${CURL_EXIT}) — aborting"
+        echo "   6=DNS 7=connection refused 22=HTTP>=400 28=timeout"
         exit 1
     fi
-    echo "   not ready, attempt ${ATTEMPT}/${MAX_ATTEMPTS}..."
+    echo "   not ready (curl exit ${CURL_EXIT}), attempt ${ATTEMPT}/${MAX_ATTEMPTS}..."
     sleep 2
 done
 echo "✅ Network is up"
@@ -71,14 +79,29 @@ echo 'net.ipv6.conf.all.forwarding = 1' >> /etc/sysctl.d/99-tailscale.conf
 sysctl -p /etc/sysctl.d/99-tailscale.conf >/dev/null
 
 echo "🔒 Fetching Tailscale auth key from Secret Manager..."
-# --secret is read with the VM's attached service account, which holds
+# Deliberately uses the metadata server + REST API rather than `gcloud`, so
+# this does not depend on the Cloud SDK being present in the boot image. The
+# token comes from the VM's attached service account, which holds
 # secretAccessor on exactly this one secret and nothing else.
-if ! AUTH_KEY="$(gcloud secrets versions access latest \
-        --secret="__SECRET_NAME__" \
-        --project="__PROJECT__" 2>/dev/null)"; then
+ACCESS_TOKEN="$(curl -fsS -H "Metadata-Flavor: Google" \
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
+
+if [ -z "${ACCESS_TOKEN}" ]; then
+    echo "❌ Could not obtain an access token from the metadata server"
+    exit 1
+fi
+
+SECRET_URL="https://secretmanager.googleapis.com/v1/projects/__PROJECT__/secrets/__SECRET_NAME__/versions/latest:access"
+
+if ! SECRET_JSON="$(curl -fsS -H "Authorization: Bearer ${ACCESS_TOKEN}" "${SECRET_URL}")"; then
     echo "❌ Could not read secret __SECRET_NAME__ — check the VM service account's IAM"
     exit 1
 fi
+
+AUTH_KEY="$(printf '%s' "${SECRET_JSON}" \
+    | python3 -c 'import base64,json,sys; print(base64.b64decode(json.load(sys.stdin)["payload"]["data"]).decode())')"
+unset ACCESS_TOKEN SECRET_JSON
 
 if [ -z "${AUTH_KEY}" ]; then
     echo "❌ Secret __SECRET_NAME__ is empty"
