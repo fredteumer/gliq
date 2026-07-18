@@ -1,0 +1,44 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*-key.json
+*credentials*.json
+service-account*.json
+
+# Claude Code / agent tooling — personal settings only
+.claude/settings.local.json
+.claude/*.local.json
+
+# Steam dataset — separately licensed, fetched by data/etl at setup
+data/raw/*
+!data/raw/.gitkeep
+
+# Generated reports and artifacts
+out/
+reports/
+*.pdf
+!docs/**/*.pdf
+
+# Pulumi
+Pulumi.*.yaml
+!Pulumi.yaml
+.pulumi/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

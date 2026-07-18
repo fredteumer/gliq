@@ -1,0 +1,58 @@
+[project]
+name = "gliq"
+version = "0.1.0"
+description = "GreenlightIQ — automated game-pitch fitment review for publisher acquisitions teams"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-only" }
+authors = [{ name = "Fred Teumer" }]
+
+dependencies = [
+    "pydantic>=2.7",
+    "python-dotenv>=1.0",
+]
+
+# Each component installs only what it needs on its own VM. Keeping these
+# separate is what makes the three processes independently deployable.
+[project.optional-dependencies]
+intake = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "google-cloud-pubsub>=2.21",
+    "anthropic>=0.34",
+    "openai>=1.40",          # Gemini via its OpenAI-compatible endpoint
+]
+scoring = [
+    "google-cloud-pubsub>=2.21",
+    "psycopg[binary]>=3.1",
+    "redis>=5.0",
+    "pandas>=2.2",
+]
+reporting = [
+    "google-cloud-pubsub>=2.21",
+    "psycopg[binary]>=3.1",
+    "jinja2>=3.1",
+]
+etl = [
+    "psycopg[binary]>=3.1",
+    "pandas>=2.2",
+    "httpx>=0.27",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["shared"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

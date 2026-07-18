@@ -1,0 +1,71 @@
+"""Environment-backed configuration shared by all three components.
+
+Loads from .env locally; on the GCP VMs the same variables are provided by the
+systemd unit's EnvironmentFile.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def _req(key: str) -> str:
+    val = os.getenv(key)
+    if not val:
+        raise RuntimeError(f"Required environment variable {key} is not set")
+    return val
+
+
+@dataclass(frozen=True)
+class Config:
+    gcp_project: str
+    gcp_region: str
+
+    topic_scoring_requested: str
+    sub_scoring_requested: str
+    topic_scoring_completed: str
+    sub_scoring_completed: str
+
+    db_host: str
+    db_port: int
+    db_name: str
+    db_user: str
+    db_password: str
+
+    redis_host: str
+    redis_port: int
+    cache_ttl_seconds: int
+
+    llm_provider: str
+
+    @classmethod
+    def from_env(cls) -> "Config":
+        return cls(
+            gcp_project=_req("GCP_PROJECT_ID"),
+            gcp_region=os.getenv("GCP_REGION", "us-central1"),
+            topic_scoring_requested=os.getenv("PUBSUB_TOPIC_SCORING_REQUESTED", "scoring-requested"),
+            sub_scoring_requested=os.getenv("PUBSUB_SUB_SCORING_REQUESTED", "scoring-requested-sub"),
+            topic_scoring_completed=os.getenv("PUBSUB_TOPIC_SCORING_COMPLETED", "scoring-completed"),
+            sub_scoring_completed=os.getenv("PUBSUB_SUB_SCORING_COMPLETED", "scoring-completed-sub"),
+            db_host=os.getenv("DB_HOST", "127.0.0.1"),
+            db_port=int(os.getenv("DB_PORT", "5432")),
+            db_name=os.getenv("DB_NAME", "greenlightiq"),
+            db_user=os.getenv("DB_USER", "gliq"),
+            db_password=os.getenv("DB_PASSWORD", ""),
+            redis_host=os.getenv("REDIS_HOST", "127.0.0.1"),
+            redis_port=int(os.getenv("REDIS_PORT", "6379")),
+            cache_ttl_seconds=int(os.getenv("CACHE_TTL_SECONDS", "3600")),
+            llm_provider=os.getenv("LLM_PROVIDER", "fixture"),
+        )
+
+    @property
+    def dsn(self) -> str:
+        return (
+            f"host={self.db_host} port={self.db_port} dbname={self.db_name} "
+            f"user={self.db_user} password={self.db_password}"
+        )
