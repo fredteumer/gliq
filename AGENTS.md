@@ -62,7 +62,7 @@ The requirement is 3 of 4 — Pub/Sub, Cloud SQL, and Memorystore satisfy it. Cl
 components/{intake,scoring,reporting}/   # the three deployable processes
 shared/                                  # pydantic schemas: pitch_profile, fitment_result
 data/                                    # Kaggle -> Cloud SQL ETL, SteamSpy enrichment client
-infra/                                   # Pulumi stack, systemd units, provisioning scripts
+infra/                                   # Pulumi stack (TypeScript) at the root; systemd/ units alongside
 samples/                                 # example pitch documents (strong and weak)
 tests/
 docs/                                    # ARCHITECTURE, DEPLOYMENT, SCREENSHOTS, AI_USAGE_LOG

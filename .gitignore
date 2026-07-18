@@ -21,9 +21,14 @@ reports/
 !docs/**/*.pdf
 
 # Pulumi
-Pulumi.*.yaml
-!Pulumi.yaml
+# Stack config IS committed: secret values are encrypted with the stack's
+# passphrase, and without it the stack is not reproducible from the repo.
+# Never `pulumi config set` a secret without the --secret flag.
 .pulumi/
+
+# Node (infra/pulumi)
+node_modules/
+*.tsbuildinfo
 
 # Python
 __pycache__/

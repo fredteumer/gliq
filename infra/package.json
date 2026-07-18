@@ -1,0 +1,19 @@
+{
+  "name": "gliq-infra",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "GreenlightIQ GCP infrastructure (Pulumi)",
+  "main": "index.ts",
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.6"
+  },
+  "dependencies": {
+    "@pulumi/gcp": "^8.0.0",
+    "@pulumi/pulumi": "^3.240.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

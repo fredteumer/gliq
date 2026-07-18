@@ -1,0 +1,12 @@
+name: gliq-infra
+runtime: nodejs
+description: GreenlightIQ GCP infrastructure — VPC, Pub/Sub, IAM, storage.
+
+# Every GreenlightIQ resource is declared here so teardown is `pulumi destroy`.
+# The project runs on finite trial credits ($300, expiring 2026-09-30); an
+# undeclared resource is one that keeps billing after teardown.
+
+config:
+  gcp:project: gliq-502820
+  gcp:region: us-central1
+  gcp:zone: us-central1-a
