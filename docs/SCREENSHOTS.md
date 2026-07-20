@@ -41,7 +41,9 @@ Capture into `docs/evidence/` and embed with `<img src="evidence/NAME.png" width
 
 **Item 13 — the rendered report.** The pitch detail page: grade, investment tier, rationale, de-risk actions, the fitment breakdown ⚠️ with `differentiation` marked *unweighted*, the ranked comps table, and the assumptions block.
 
-💡 The **All pitches** list is worth one frame on its own — four pitches, three distinct grades and tiers, one of them `Untitled pitch / F / pass`, which shows the insufficient-information path rendering differently rather than as a zeroed scorecard.
+⭐ **Capture the `strong-pitch.md` report in full — the two-verdict view is the strongest single frame.** The deterministic grade (**D / de-risk**) sits above the **LLM analyst's second opinion**, which *dissents* (**B / conditional**) and argues the comps are irrelevant outliers for a $20 premium indie — the exact `price_alignment` judgement the tag scorer cannot make. It shows the deterministic control and the LLM judgement side by side, with the grade explicitly unchanged. ➡️ [ARCHITECTURE.md §8](./ARCHITECTURE.md).
+
+💡 The **All pitches** list is worth one frame on its own — distinct grades and tiers, including an `Untitled pitch / F / pass`, which shows the insufficient-information path rendering differently rather than as a zeroed scorecard.
 
 **Scripted alternative** (if a terminal capture is preferred) — everything except `/healthz` needs a session, so use a cookie jar. ➡️ [DEPLOYMENT.md](./DEPLOYMENT.md), "Scripted submission".
 

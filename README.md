@@ -54,7 +54,7 @@ flowchart LR
 | :--- | :--- | :--- | :--- |
 | **A** | `gliq-intake` | design doc → `pitch_profile` | Public HTTPS entry point. Uses an LLM to convert unstructured prose into a validated, machine-comparable record. |
 | **B** | `gliq-scoring` | `pitch_profile` → `fitment_result` | Matches the profile against the comps corpus, computes weighted sub-scores, maps to a letter grade. **Rule-based and deterministic** — no LLM in the scoring path. |
-| **C** | `gliq-report` | `fitment_result` → report | Maps the score to an investment tier, renders the evidence report, persists results and notifies. |
+| **C** | `gliq-report` | `fitment_result` → report | Maps the score to an investment tier, renders the evidence report, and attaches an **LLM analyst's subjective second opinion** shown beside the deterministic grade — never changing it. ➡️ [ARCHITECTURE.md §8](docs/ARCHITECTURE.md). |
 
 ### Cloud services
 
@@ -103,13 +103,13 @@ docs/                                    # architecture, deployment, evidence
 
 🚧 Setup instructions land with the first deployable milestone. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
-Component A supports a **`fixture` LLM provider** that returns a canned `pitch_profile`, so Components B and C are fully developable and testable with no API key and no network access.
+Both the extractor (A) and the analyst (C) ship a **`fixture` provider** that returns canned output, so the whole pipeline is developable and testable with no API key and no network access — and an unconfigured deployment spends nothing.
 
 ## Scope
 
-**In scope (MVP):** the three-component pipeline above, rule-based deterministic scoring over a static corpus, Markdown/HTML report output, deployed on GCP via Pulumi.
+**Delivered:** the three-component pipeline above; rule-based deterministic scoring over a static corpus (➡️ [SCORING.md](docs/SCORING.md)); an LLM analyst's subjective second opinion beside the grade (➡️ [ARCHITECTURE.md §8](docs/ARCHITECTURE.md)); a login-gated review UI on Component A; deployed on GCP via Pulumi behind nginx + TLS.
 
-**Out of scope, tracked as stretch goals:** live data scraping, a full web front-end, Cloud Tasks as a dedicated work queue, and replacing the rule-based scorer with an agentic "acquisitions analyst" that autonomously drafts an investment memo.
+**Out of scope, tracked for later:** live data scraping, Cloud Tasks as a dedicated work queue (rejected — [ARCHITECTURE.md §7](docs/ARCHITECTURE.md)), multi-modal (image) pitch input, and an aggregate score pooling the human, deterministic, and LLM reads.
 
 ## License
 

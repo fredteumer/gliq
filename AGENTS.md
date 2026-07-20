@@ -31,7 +31,7 @@ Three processes, one per VM, coordinated through managed GCP services.
 | :--- | :--- | :--- |
 | **A** | `gliq-intake` | Accepts a design doc over HTTPS, uses an LLM to extract a structured `pitch_profile`, publishes a scoring request |
 | **B** | `gliq-scoring` | Consumes scoring requests, matches the profile against the Steam comps corpus, computes a `fitment_result`, publishes a completion event |
-| **C** | `gliq-report` | Consumes completion events, renders the recommendation and evidence report, persists and notifies |
+| **C** | `gliq-report` | Consumes completion events, renders the recommendation and evidence report, attaches an LLM analyst's subjective second opinion (never changing the grade — ➡️ `docs/ARCHITECTURE.md` §8), persists and notifies |
 
 ### Cloud services
 

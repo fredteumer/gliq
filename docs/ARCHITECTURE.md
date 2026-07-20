@@ -2,7 +2,7 @@
 
 > 🚧 Expanded during implementation. See the [README](../README.md) for the current overview and diagram.
 >
-> **Status:** sections 3–5 are effectively covered elsewhere — cloud service selection in the README and `infra/core/*.ts` module docstrings, message contracts in [`shared/schemas.py`](../shared/schemas.py), and the scoring model in [SCORING.md](./SCORING.md). Section 7 is written below. Sections 1, 2, and 6 still need writing here, and they are graded.
+> **Status:** sections 3–5 are effectively covered elsewhere — cloud service selection in the README and `infra/core/*.ts` module docstrings, message contracts in [`shared/schemas.py`](../shared/schemas.py), and the scoring model in [SCORING.md](./SCORING.md). Sections 7 and 8 are written below. Sections 1, 2, and 6 still need writing here, and they are graded.
 
 ## Contents
 
@@ -13,6 +13,7 @@
 5. **Scoring model** — ✅ written up separately and in full: ➡️ [SCORING.md](./SCORING.md). Sub-scores, weights, grade banding, estimation assumptions, and the calibration methodology behind every constant.
 6. **Networking & security** — public surface, Tailscale admin plane, service accounts, least privilege
 7. **Assignment constraints** — ✅ written below
+8. **LLM analyst** — ✅ the subjective second opinion in Component C, written below
 
 ## Constraint note
 
@@ -56,3 +57,15 @@ Component B acknowledges a message only after the pitch is scored and persisted,
 ⛔ **Caching is not implemented, and this is a design decision rather than an omission.** Memorystore appears in early planning notes and in the private-IP range allocated in `infra/core/networking.ts`; no instance was ever provisioned. The workload does not justify one. Component B's candidate query is the only plausible cache target, and this system's throughput is a handful of pitches — a Redis instance would be introduced solely to be pointed at in a screenshot, would cost real budget against finite trial credits, and would add a failure mode to a pipeline that currently has none. Introducing infrastructure a system does not need, to satisfy a checkbox, is the kind of decision this document should record honestly rather than dress up.
 
 💡 If throughput ever justified it, the insertion point is already isolated: `components/scoring/corpus.py` is the only code that touches Postgres, and `fetch_candidates` is a single function keyed on genre and tag cluster.
+
+## 8. LLM analyst — Component C's second opinion
+
+The letter grade is **deterministic and stays that way** — a change in grade must be attributable to extraction or comp selection, never to model drift. Alongside it, Component C attaches a **subjective second opinion** from an LLM prompted as the acquisitions committee. It reads the raw pitch prose the tag extractor cannot, consults the deterministic result, and casts its own category, grade, tier and rationale. The two verdicts sit side by side in the report — the *disagreement* is the point. The analyst's edge is exactly the differentiation and price-fit judgement the deterministic score is blind to: on the strong sample it dissents from the deterministic **D**, arguing the comps are irrelevant outliers and the pitch is aimed at the $20 premium indie space — the very `price_alignment` penalty tags cannot reason about.
+
+Three properties make it safe to ship:
+
+- **It never changes the grade.** The opinion lives in its own `advisory` column (migration 0005) and renders as a clearly-labelled separate section. Keeping the reproducible control (deterministic) and the judgement (LLM) apart is what lets a human's read be pooled with both later, into a future aggregate score.
+- **Provider-swappable, config-driven.** `fixture` (default — canned, no key, no network, no spend) · `gemini` (via its OpenAI-compatible endpoint) · `anthropic`. Provider, model and key all come from config. ➡️ [`components/reporting/advisor.py`](../components/reporting/advisor.py).
+- **It degrades, never breaks.** A missing key, a rate limit, or an unparseable reply returns nothing and Component C renders the full deterministic report regardless. The analyst is decision support, not a dependency of the pipeline.
+
+The prose it reads is carried A→B on the message, **persisted by B without ever being scored on** (scoring stays a pure function of the profile and corpus), and read back by C — migration 0005.
