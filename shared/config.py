@@ -47,6 +47,14 @@ class Config:
 
     llm_provider: str
 
+    #: Component A's web UI. Both default to empty, and empty is the SECURE
+    #: default: `auth.verify_password` rejects every password when the hash is
+    #: unset, so a stack that has not been configured locks the login gate
+    #: rather than leaving it open. ➡️ infra/scripts/hash-password.py
+    session_secret: str
+    admin_password_hash: str
+    admin_user: str
+
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
@@ -73,6 +81,9 @@ class Config:
             # canned profile regardless of input, so leaving it as the default
             # would silently score every real pitch as the same fixture game.
             llm_provider=os.getenv("LLM_PROVIDER", "deterministic"),
+            session_secret=os.getenv("SESSION_SECRET", ""),
+            admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", ""),
+            admin_user=os.getenv("ADMIN_USER", "admin"),
         )
 
     @property
