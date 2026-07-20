@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Sign in · GreenlightIQ{% endblock %}
+{% block content %}
+<div style="max-width:380px;margin:3rem auto;">
+  <h1>Sign in</h1>
+  <p class="muted" style="margin-top:-.6rem">Pitch review for acquisitions.</p>
+
+  {% if error %}<div class="note error">{{ error }}</div>{% endif %}
+
+  <form method="post" action="/login" class="panel">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label for="username">Username</label>
+    <input id="username" name="username" type="text" autocomplete="username" autofocus required>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit" style="width:100%">Sign in</button>
+  </form>
+</div>
+{% endblock %}

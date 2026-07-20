@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Scoring · GreenlightIQ{% endblock %}
+{# Refresh while the pipeline works. Component B and C typically finish within
+   a few seconds; this is the normal path, not an error state. #}
+{% block content %}
+<meta http-equiv="refresh" content="4">
+<h1>⏳ Scoring in progress</h1>
+<div class="panel">
+  <p style="margin-top:0">
+    This pitch has been queued. Component B is matching it against the comparables
+    corpus, then Component C renders the report.
+  </p>
+  <p class="muted mono">{{ pitch_id }}</p>
+  {% if row %}<p class="muted">Status: <strong>{{ row.status }}</strong>{% if age %} · {{ "%.0f"|format(age) }}s elapsed{% endif %}</p>{% endif %}
+  <p class="muted" style="margin-bottom:0">This page refreshes automatically.</p>
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}All pitches · GreenlightIQ{% endblock %}
+{% block content %}
+<h1>All pitches</h1>
+{% if db_error %}
+  <div class="note error"><strong>The database is unreachable.</strong> Submissions still work —
+  scoring runs through Pub/Sub and does not depend on this page.<br>
+  <span class="mono muted">{{ db_error }}</span></div>
+{% endif %}
+{% if rows %}
+<div class="panel" style="padding:0">
+<table>
+  <thead><tr><th>Title</th><th>Grade</th><th>Tier</th><th>Status</th><th>Submitted</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td><a href="/pitches/{{ r.pitch_id }}">{{ r.title or "Untitled pitch" }}</a></td>
+      <td>{% if r.grade %}<span class="badge g-{{ r.grade }}">{{ r.grade }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="tier">{{ (r.tier or "—")|replace("_","-") }}</td>
+      <td class="muted">{{ r.status }}</td>
+      <td class="muted">{{ r.submitted_at.strftime("%Y-%m-%d %H:%M") if r.submitted_at else "—" }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% elif not db_error %}
+<div class="panel"><p style="margin:0" class="muted">No pitches yet. <a href="/">Submit one →</a></p></div>
+{% endif %}
+{% endblock %}

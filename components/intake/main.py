@@ -24,13 +24,16 @@ it can be tested offline against the same code that runs here.
 from __future__ import annotations
 
 import logging
+import os
+import secrets
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import Body, FastAPI, HTTPException, status
+from fastapi import Body, FastAPI, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from starlette.middleware.sessions import SessionMiddleware
 
-from components.intake import vocabulary
+from components.intake import auth, db, vocabulary, web
 from components.intake.providers import get_extractor
 from shared.config import Config
 from shared.schemas import PitchProfile, ScoringRequested
@@ -84,6 +87,11 @@ class Intake:
         self.topic: str | None = None
         self.publish_error: str | None = None
 
+        # ⚠️ Read-only, and opened without blocking startup — a database
+        # outage must degrade the review pages, not stop intake accepting
+        # pitches. ➡️ db.py
+        self.pool = db.make_pool(config.dsn)
+
         # ⚠️ Imported here, not at module scope: this keeps `extract`,
         # `vocabulary` and the whole test suite runnable without
         # google-cloud-pubsub installed and without credentials.
@@ -106,6 +114,16 @@ class Intake:
             # honestly with 503 rather than accepting work it cannot deliver.
             self.publish_error = str(exc)
             log.error("❌ Pub/Sub publisher unavailable: %s", exc)
+
+    def publish_profile(self, profile: PitchProfile) -> str:
+        """Publish a profile for scoring and return the new pitch id.
+
+        The single path a pitch takes to Component B. Both the JSON API and the
+        web form funnel through here, so the two cannot drift.
+        """
+        request = ScoringRequested(profile=profile)
+        self.publish(request)
+        return str(request.pitch_id)
 
     def publish(self, request: ScoringRequested) -> None:
         """Publish a scoring request, or raise 503."""
@@ -145,6 +163,7 @@ async def lifespan(app: FastAPI):
     )
 
     intake = Intake(config)
+    app.state.intake = intake
     log.info(
         "✅ extractor=%s vocabulary=%s tags from %s titles",
         intake.extractor.name,
@@ -153,9 +172,20 @@ async def lifespan(app: FastAPI):
     )
     if intake.publish_error is None:
         log.info("✅ listening — publishing to %s", intake.topic)
+    if not config.admin_password_hash:
+        # 🔒 Loud, because the failure is silent from the outside: the UI simply
+        # rejects every login, which looks identical to a forgotten password.
+        log.error(
+            "🔒 ADMIN_PASSWORD_HASH is not set — every login will be refused. "
+            "Generate one with infra/scripts/hash-password.py"
+        )
 
     yield
 
+    try:
+        intake.pool.close()
+    except Exception:  # noqa: BLE001 — shutdown must not raise
+        pass
     log.info("👋 stopped")
 
 
@@ -168,6 +198,64 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# ⚠️ Read at import time, not from Config: middleware is installed before the
+# lifespan handler runs, so the app object cannot wait for startup to learn its
+# own signing key.
+#
+# 🔒 An unset SESSION_SECRET falls back to a per-process random value. That
+# invalidates every session on restart — deliberately noisy — rather than
+# signing cookies with a predictable constant, which would let anyone forge a
+# session and walk straight past the login gate.
+_session_secret = os.getenv("SESSION_SECRET") or secrets.token_hex(32)
+if not os.getenv("SESSION_SECRET"):
+    log.warning(
+        "🔒 SESSION_SECRET is not set — using an ephemeral key. Logins will not "
+        "survive a restart. Set it with `pulumi config set --secret sessionSecret`."
+    )
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    """🔒 The gate, enforced before routing.
+
+    ⚠️ This has to be middleware rather than a per-route dependency. FastAPI
+    validates the request body BEFORE a handler runs, so an in-handler check
+    never fires on a malformed request — `POST /pitches` with a bad body
+    answered 422 to an anonymous caller, telling an unauthenticated stranger
+    about the endpoint's schema. Checked here, authentication precedes parsing.
+
+    Per-route `auth.require_session()` calls are kept as well. They are
+    redundant while this is correct, which is the point: an edit to PUBLIC_PATHS
+    cannot silently expose a handler.
+    """
+    if request.url.path not in auth.PUBLIC_PATHS and not auth.current_user(request):
+        return auth.redirect_to_login(request)
+    return await call_next(request)
+
+
+# ⚠️ Order matters and is not obvious. Starlette runs the LAST-added middleware
+# outermost, so SessionMiddleware must be added AFTER the gate above — otherwise
+# the gate runs first, `request.session` does not exist yet, and every request
+# fails with an AssertionError instead of being authenticated.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_session_secret,
+    session_cookie="gliq_session",
+    max_age=8 * 60 * 60,
+    same_site="lax",
+    # ⚠️ Requires nginx to forward X-Forwarded-Proto; without it the app sees
+    # plain HTTP behind the proxy, refuses to set the cookie, and every login
+    # silently bounces back to the form. ➡️ infra/scripts/nginx-gliq.conf
+    https_only=True,
+)
+
+app.include_router(web.router)
+
+
+@app.exception_handler(auth.NotLoggedIn)
+async def _not_logged_in(request: Request, _exc: auth.NotLoggedIn):
+    """Send a browser to the login form instead of returning a bare 401."""
+    return auth.redirect_to_login(request)
 
 
 def _require_intake() -> Intake:
@@ -204,6 +292,7 @@ def healthz() -> dict[str, Any]:
 
 @app.post("/pitches", status_code=status.HTTP_202_ACCEPTED, response_model=PitchAccepted)
 def submit_pitch(
+    request: Request,
     submission: Annotated[PitchSubmission, Body()],
 ) -> PitchAccepted:
     """Accept a design document, extract a profile, queue it for scoring.
@@ -217,7 +306,12 @@ def submit_pitch(
     ⚠️ A sync `def`, so Starlette runs it in a threadpool: both the extraction
     and the publish confirmation block, and an `async def` would stall the event
     loop for every other request.
+
+    🔒 Requires a session, like every other route except `/healthz`. This is a
+    public endpoint that queues work and — once Part 2 lands — spends LLM credits
+    per call, so leaving it open would make the login gate on the UI decorative.
     """
+    auth.require_session(request)
     current = _require_intake()
 
     profile = current.extractor.extract(submission.document)

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Submit a pitch · GreenlightIQ{% endblock %}
+{% block content %}
+<h1>Submit a pitch</h1>
+
+{% if error %}<div class="note error">{{ error }}</div>{% endif %}
+{% if db_error %}
+  <div class="note"><strong>The review database is unreachable</strong>, so recent pitches are hidden.
+  Submitting still works — scoring runs through Pub/Sub and does not depend on it.</div>
+{% endif %}
+
+<form method="post" action="/submit" enctype="multipart/form-data" class="panel">
+  <label for="document">Design document <span class="muted">(.md or .txt, UTF-8, max 2MB)</span></label>
+  <input id="document" name="document" type="file" accept=".md,.txt,text/plain,text/markdown">
+
+  {% if samples %}
+    <label for="sample">…or run a bundled sample</label>
+    <select id="sample" name="sample">
+      <option value="">— none —</option>
+      {% for s in samples %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+    </select>
+  {% endif %}
+
+  <label for="title">Title override <span class="muted">(optional)</span></label>
+  <input id="title" name="title" type="text" placeholder="Leave blank to read it from the document heading">
+
+  <button type="submit">Score this pitch</button>
+</form>
+
+{% if counts %}
+<h2>Pipeline</h2>
+<div class="grid">
+  {% for status, n in counts.items() %}
+    <div class="panel"><div class="stat">{{ n }}</div><div class="muted">{{ status }}</div></div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if recent %}
+<h2>Recent</h2>
+<div class="panel" style="padding:0">
+<table>
+  <thead><tr><th>Title</th><th>Grade</th><th>Tier</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for r in recent %}
+    <tr>
+      <td><a href="/pitches/{{ r.pitch_id }}">{{ r.title or "Untitled pitch" }}</a></td>
+      <td>{% if r.grade %}<span class="badge g-{{ r.grade }}">{{ r.grade }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="tier">{{ (r.tier or "—")|replace("_","-") }}</td>
+      <td class="muted">{{ r.status }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted" style="font-size:.9rem"><a href="/pitches">All pitches →</a></p>
+{% endif %}
+{% endblock %}

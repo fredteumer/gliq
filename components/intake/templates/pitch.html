@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ row.title or "Untitled pitch" }} · GreenlightIQ{% endblock %}
+{% block content %}
+<p class="muted" style="font-size:.9rem"><a href="/pitches">← All pitches</a></p>
+
+{% if row.status == "failed" %}
+  <div class="note error"><strong>This pitch failed to process.</strong><br>
+  <span class="mono">{{ row.error }}</span></div>
+{% endif %}
+
+{# ⚠️ report_md is rendered to HTML by the `markdown` library with raw-HTML
+   extensions off. Untrusted fields were already escaped when Component C wrote
+   the report — this is the second line of defence, not the first. #}
+<div class="report">
+  {{ report_html|safe }}
+</div>
+
+<p class="muted" style="font-size:.85rem;margin-top:1.5rem">
+  Pitch <span class="mono">{{ row.pitch_id }}</span> ·
+  submitted {{ row.submitted_at.strftime("%Y-%m-%d %H:%M UTC") if row.submitted_at else "—" }}{% if row.reported_at %} ·
+  reported {{ row.reported_at.strftime("%Y-%m-%d %H:%M UTC") }}{% endif %}
+</p>
+{% endblock %}

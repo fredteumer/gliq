@@ -21,6 +21,16 @@ intake = [
     "google-cloud-pubsub>=2.21",
     "anthropic>=0.34",
     "openai>=1.40",          # Gemini via its OpenAI-compatible endpoint
+    # --- the review UI ---
+    # ⚠️ `pool`, not just `binary`. A serves overlapping requests from a
+    # threadpool and a psycopg connection is not thread-safe, so unlike B and C
+    # it needs a pool rather than one long-lived connection.
+    # 🔒 Read-only use — see components/intake/db.py.
+    "psycopg[binary,pool]>=3.1",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",   # multipart/form-data, for document upload
+    "itsdangerous>=2.1",         # signs the session cookie (Starlette's middleware)
+    "markdown>=3.6",             # renders pitches.report_md for display
 ]
 scoring = [
     "google-cloud-pubsub>=2.21",
