@@ -9,23 +9,47 @@
   Submitting still works — scoring runs through Pub/Sub and does not depend on it.</div>
 {% endif %}
 
-<form method="post" action="/submit" enctype="multipart/form-data" class="panel">
-  <label for="document">Design document <span class="muted">(.md or .txt, UTF-8, max 2MB)</span></label>
-  <input id="document" name="document" type="file" accept=".md,.txt,text/plain,text/markdown">
+<div class="cols">
+  <form method="post" action="/submit" enctype="multipart/form-data" class="panel">
+    <label for="document">Design document <span class="muted">(.md or .txt, UTF-8, max 2MB)</span></label>
+    <input id="document" name="document" type="file" accept=".md,.txt,text/plain,text/markdown">
 
-  {% if samples %}
-    <label for="sample">…or run a bundled sample</label>
-    <select id="sample" name="sample">
-      <option value="">— none —</option>
-      {% for s in samples %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
-    </select>
+    {% if samples %}
+      <label for="sample">…or run a bundled sample</label>
+      <select id="sample" name="sample">
+        <option value="">— none —</option>
+        {% for s in samples %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+      </select>
+    {% endif %}
+
+    <label for="title">Title override <span class="muted">(optional)</span></label>
+    <input id="title" name="title" type="text" placeholder="Leave blank to read it from the document heading">
+
+    <button type="submit">Score this pitch</button>
+  </form>
+
+  {% if example %}
+  {# The worked example. A real file in samples/, pinned by a test to extract
+     with full coverage — an example that would itself be capped would teach
+     producers to submit documents that score lower. #}
+  <figure class="panel example" style="margin:0">
+    <figcaption><strong>What a readable pitch looks like</strong> — this exact document
+    extracts every field the score depends on, with no completeness cap.</figcaption>
+    <pre>{{ example }}</pre>
+    <ul class="reads">
+      <li><b>The <code>#</code> heading</b> becomes the title. Without one the grade is capped.</li>
+      <li><b>Concept prose</b> is matched against the 452 tags real Steam titles use —
+          <em>metroidvania</em>, <em>hand-drawn</em>, <em>2D</em> — which is what selects your comparables.
+          Genre is inferred from those tags, so you need not name one.</li>
+      <li><b>Bullets under a mechanics heading</b> become the mechanics list.</li>
+      <li><b>A price near the word “priced”</b> sets the price tier. A funding ask elsewhere
+          in the document is ignored, so quoting a budget is safe.</li>
+      <li><b>Platforms</b> are matched to what Steam records — Windows, macOS, Linux.
+          Consoles are noted by a reader but cannot be compared against.</li>
+    </ul>
+  </figure>
   {% endif %}
-
-  <label for="title">Title override <span class="muted">(optional)</span></label>
-  <input id="title" name="title" type="text" placeholder="Leave blank to read it from the document heading">
-
-  <button type="submit">Score this pitch</button>
-</form>
+</div>
 
 {% if counts %}
 <h2>Pipeline</h2>

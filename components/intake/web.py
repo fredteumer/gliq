@@ -76,11 +76,35 @@ def render_markdown(text: str | None) -> str:
     return markdown_lib.markdown(defused, extensions=MARKDOWN_EXTENSIONS)
 
 
+#: The worked example shown beside the submit form.
+#:
+#: ⚠️ It is a REAL FILE in samples/, not prose embedded in a template, and it
+#: is verified by a test to extract to full coverage with no completeness cap.
+#: An example that would itself be capped teaches the wrong shape, and an
+#: example that drifts from what the extractor actually reads is worse than
+#: none — producers would follow it and score lower for doing so.
+EXAMPLE_PITCH = "minimal-pitch.md"
+
+
 def available_samples() -> list[str]:
     """Bundled example pitches, by filename."""
     if not SAMPLES_DIR.is_dir():
         return []
     return sorted(p.name for p in SAMPLES_DIR.glob("*.md"))
+
+
+def example_pitch_text() -> str:
+    """The worked example, or empty if it is missing.
+
+    Missing must degrade to hiding the panel, never to a broken page — this is
+    guidance, and guidance is not worth a 500.
+    """
+    path = SAMPLES_DIR / EXAMPLE_PITCH
+    try:
+        return path.read_text()
+    except OSError:
+        log.warning("⚠️ example pitch %s is missing — the guidance panel is hidden", path)
+        return ""
 
 
 def page(request: Request, template: str, status_code: int = 200, **context: Any) -> HTMLResponse:
@@ -177,6 +201,7 @@ def dashboard(request: Request) -> HTMLResponse:
         counts=counts,
         samples=available_samples(),
         db_error=db_error,
+        example=example_pitch_text(),
     )
 
 
@@ -204,6 +229,7 @@ async def submit(
             samples=available_samples(),
             db_error=None,
             error=error,
+            example=example_pitch_text(),
             status_code=400,
         )
 

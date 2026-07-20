@@ -31,20 +31,19 @@ Capture into `docs/evidence/` and embed with `<img src="evidence/NAME.png" width
 
 ## 📸 Ready to capture now (as of 2026-07-20)
 
-All three components run end to end, so items **7, 8, 9, 11, 13 and 14 are reachable today** — still ⬜ above because the PNGs have not been taken. The commands below reproduce exactly what was observed, so capture is a matter of running them and screenshotting.
+**Every item is now reachable.** The system is live at **https://greenlightiq.fredt.io** with TLS and a login gate, so items 5, 6 and 13 are captured in a browser rather than a terminal. Items remain ⬜ above only because the PNGs have not been taken.
 
-⚠️ Items 5, 6 and 12 remain blocked: nginx/TLS is not configured (so submission is loopback-only for now), and Memorystore is provisioned but unwired.
+**Items 1, 2, 3, 10, 12** are GCP console screenshots. **4, 7, 8, 9, 11** are terminal. **5, 6, 13, 14** are the browser UI.
 
-**Submit a pitch** — from the intake VM, since uvicorn binds `127.0.0.1:8000` and nginx is not up yet:
+**Item 5 — TLS.** Load `https://greenlightiq.fredt.io` and capture the padlock plus the certificate details (issuer *Let's Encrypt*, the `greenlightiq.fredt.io` subject). 💡 Capture the login screen for this one — it shows TLS *and* that the endpoint is gated.
 
-```bash
-ssh root@gliq-intake
-curl -s http://127.0.0.1:8000/healthz
-cd /opt/gliq && python3 -c "import json,urllib.request; d=open('samples/strong-pitch.md').read(); \
-  r=urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8000/pitches', \
-  data=json.dumps({'document':d}).encode(), headers={'Content-Type':'application/json'})); \
-  print(json.dumps(json.load(r), indent=2))"
-```
+**Item 6 — submission through the public endpoint.** Sign in, pick `strong-pitch.md` from the sample dropdown, submit. The ⏳ pending page auto-refreshes and resolves to the report within ~10s. 💡 Grab the pending page too — it is evidence the work is genuinely asynchronous rather than a synchronous call pretending to be a pipeline.
+
+**Item 13 — the rendered report.** The pitch detail page: grade, investment tier, rationale, de-risk actions, the fitment breakdown ⚠️ with `differentiation` marked *unweighted*, the ranked comps table, and the assumptions block.
+
+💡 The **All pitches** list is worth one frame on its own — four pitches, three distinct grades and tiers, one of them `Untitled pitch / F / pass`, which shows the insufficient-information path rendering differently rather than as a zeroed scorecard.
+
+**Scripted alternative** (if a terminal capture is preferred) — everything except `/healthz` needs a session, so use a cookie jar. ➡️ [DEPLOYMENT.md](./DEPLOYMENT.md), "Scripted submission".
 
 **Item 7 — A extracts and publishes:** `journalctl -u gliq-intake -n 20 --no-pager`
 

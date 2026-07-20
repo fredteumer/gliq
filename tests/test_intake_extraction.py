@@ -278,3 +278,38 @@ def test_part_two_providers_fail_at_selection_not_at_request_time():
 def test_an_unknown_provider_names_the_valid_options():
     with pytest.raises(RuntimeError, match="deterministic"):
         get_extractor("gpt4")
+
+
+# ------------------------------------------------------------ worked example
+
+
+def test_the_example_pitch_shown_in_the_ui_extracts_without_a_cap():
+    """⚠️ The UI shows `samples/minimal-pitch.md` as "what good looks like".
+
+    If that document does not itself populate every scoring field, the UI is
+    teaching producers a shape that gets their pitch capped — worse than showing
+    no example at all. Pinned here so an edit to the sample cannot quietly make
+    the guidance wrong.
+    """
+    from components.intake.web import EXAMPLE_PITCH, SAMPLES_DIR
+
+    profile = extract((SAMPLES_DIR / EXAMPLE_PITCH).read_text())
+
+    assert [f for f in COVERAGE_FIELDS if not getattr(profile, f)] == []
+    assert [f for f in LOAD_BEARING_FIELDS if not getattr(profile, f)] == []
+    assert unmatchable(profile) == []
+    assert profile.extraction_confidence == 1.0
+
+
+def test_the_example_demonstrates_the_features_it_claims_to():
+    """Each annotation beside the example asserts something. Check they hold."""
+    from components.intake.web import EXAMPLE_PITCH, SAMPLES_DIR
+
+    profile = extract((SAMPLES_DIR / EXAMPLE_PITCH).read_text())
+
+    assert profile.title == "Tidal Rift"                      # the # heading
+    assert "Metroidvania" in profile.tags                     # prose -> corpus tags
+    assert profile.primary_genre                              # genre inferred from tags
+    assert profile.core_mechanics                             # bullets under a heading
+    assert profile.price_tier is PriceTier.P14_99             # "Priced at $14.99"
+    assert profile.target_platforms == ["Windows", "macOS"]   # Steam's platform vocabulary

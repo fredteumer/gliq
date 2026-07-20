@@ -59,13 +59,83 @@ pulumi config set enableDatabase false && pulumi up
 
 ## Outline
 
-1. **Provision** — `cd infra && pulumi up`. Creates Pub/Sub topics and subscriptions, three VMs, service accounts, firewall rules, the artifact bucket, and (in a later pass) Cloud SQL and Memorystore.
+1. **Provision** — `cd infra && pulumi up`. Creates Pub/Sub topics and subscriptions, three VMs, service accounts, firewall rules, the artifact bucket, and (in a later pass) Cloud SQL. ⛔ No Memorystore — caching is deliberately not implemented, ➡️ [ARCHITECTURE.md §7](./ARCHITECTURE.md).
 2. **Sync config** — `python3 infra/env-from-stack.py` writes stack outputs into `.env`. Re-run after **every** `pulumi up`, or the components point at stale resource names.
 2. **Join the tailnet** — each VM joins Tailscale; public SSH stays closed.
 3. **Load the corpus** — `data/etl` fetches the Steam dataset and loads it into Cloud SQL. The dataset is not committed to this repository.
 4. **Deploy the components** — install per-component dependencies and enable the systemd units in `infra/systemd`.
-5. **Expose Component A** — nginx + certbot on the intake VM, serving `greenlightiq.fredt.io`.
+5. **Expose Component A** — nginx + certbot on the intake VM, serving `greenlightiq.fredt.io`. ➡️ the runbook below.
 6. **Verify** — submit a sample pitch from `samples/` and follow it through `journalctl` on all three VMs.
+
+## 🔒 Exposing Component A (step 5)
+
+Component A is the only publicly reachable process. nginx terminates TLS and proxies to uvicorn on loopback; the login gate lives in the application.
+
+⚠️ **Order matters.** Configure the credential *before* issuing the certificate. Issuing first leaves an unauthenticated public endpoint that queues work, and Certificate Transparency logs are scanned by bots within minutes of issuance.
+
+### 5a — Set the login credential
+
+```bash
+python3 infra/scripts/hash-password.py          # prompts twice, echoes nothing
+cd infra
+pulumi config set --secret adminPasswordHash '<paste the hash>'
+pulumi config set --secret sessionSecret "$(openssl rand -hex 32)"
+pulumi up                                        # publishes the two stack outputs
+cd .. && python3 infra/env-from-stack.py         # writes them into .env
+./infra/scripts/deploy.sh intake --deps          # ships /etc/gliq/gliq.env
+```
+
+🔒 An unset `ADMIN_PASSWORD_HASH` **refuses every login** rather than allowing any, and Component A logs `🔒 ADMIN_PASSWORD_HASH is not set` at startup. An unconfigured instance is locked, not open.
+
+### 5b — nginx and the certificate
+
+DNS must already point at the reserved static IP (`pulumi stack output intakeStaticIp`). The `gliq-allow-https` firewall rule already opens **80 and 443** to the `gliq-public` tag, so certbot's HTTP-01 challenge needs no infrastructure change.
+
+```bash
+ssh root@gliq-intake
+apt-get install -y nginx certbot python3-certbot-nginx
+
+# from the repo, in another shell:
+scp infra/scripts/nginx-gliq.conf root@gliq-intake:/etc/nginx/sites-available/gliq
+
+ssh root@gliq-intake
+ln -sf /etc/nginx/sites-available/gliq /etc/nginx/sites-enabled/gliq
+rm -f /etc/nginx/sites-enabled/default
+nginx -t && systemctl reload nginx
+
+certbot --nginx -d greenlightiq.fredt.io --non-interactive --agree-tos -m <you@example.com> --redirect
+```
+
+certbot rewrites the site file in place, adding the `listen 443` block and an HTTP→HTTPS redirect, and installs a renewal timer. Verify with `certbot renew --dry-run` and `systemctl is-active certbot.timer`.
+
+### 5c — Verify the gate
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' https://greenlightiq.fredt.io/healthz   # 200, open by design
+curl -s -o /dev/null -w '%{http_code}\n' https://greenlightiq.fredt.io/          # 303 -> /login
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -d '{}' \
+     -H 'Content-Type: application/json' https://greenlightiq.fredt.io/pitches   # 303, NOT 422
+```
+
+⚠️ That last one is the meaningful check. A **422** means request-body validation ran before authentication and the endpoint is describing its schema to anonymous callers — the gate is middleware precisely so parsing never happens first.
+
+### Scripted submission
+
+Everything except `/healthz` requires a session, so scripted runs need a cookie jar:
+
+```bash
+curl -sc /tmp/gliq.jar -X POST https://greenlightiq.fredt.io/login \
+     -d 'username=admin' -d 'password=<password>' -o /dev/null
+curl -sb /tmp/gliq.jar -X POST https://greenlightiq.fredt.io/pitches \
+     -H 'Content-Type: application/json' \
+     -d "$(python3 -c 'import json;print(json.dumps({"document":open("samples/strong-pitch.md").read()}))')"
+```
+
+### ⚠️ What does not survive a rebuild
+
+`/etc/nginx` and `/etc/letsencrypt` live outside `/opt/gliq`, so `deploy.sh` never touches them — but `node-startup.sh` does not provision nginx either, so **a recreated VM loses both** and 5b must be repeated.
+
+Deliberately not automated: Let's Encrypt rate-limits to **5 certificates per domain per week**, and a boot script that re-issues on every recreation could lock the hostname out at the worst moment. Package install and site config could be moved into `node-startup.sh`; certificate issuance should stay a deliberate act.
 
 ## 🚀 Deploying component code
 
