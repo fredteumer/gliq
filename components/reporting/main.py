@@ -42,6 +42,7 @@ import psycopg
 from google.cloud import pubsub_v1
 from pydantic import ValidationError
 
+from components.reporting.advisor import get_advisor
 from components.reporting.recommend import recommend
 from components.reporting.render import render_report
 from shared.config import Config
@@ -64,11 +65,16 @@ REPORT_SQL = """
     UPDATE pitches
        SET status = 'reported',
            recommendation = %(recommendation)s,
+           advisory = %(advisory)s,
            report_md = %(report_md)s,
            reported_at = now(),
            error = NULL
      WHERE pitch_id = %(pitch_id)s
 """
+
+#: The raw pitch document, which Component B persisted. Read back so the LLM
+#: analyst can weigh the prose the tag extractor never saw. ➡️ migration 0005.
+DOCUMENT_SQL = "SELECT document FROM pitches WHERE pitch_id = %(pitch_id)s"
 
 #: ⚠️ Also an UPDATE, touching ONLY status and error.
 #:
@@ -89,12 +95,26 @@ class Reporter:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.conn = psycopg.connect(config.dsn, autocommit=True)
+        # Built once at startup. An unknown provider is fatal here (a deploy
+        # error worth failing on); a missing KEY is not — the advisor degrades
+        # to None at call time, so C still starts and still reports. ➡️ advisor.py
+        self.advisor = get_advisor(config)
 
     def close(self) -> None:
         try:
             self.conn.close()
         except Exception:  # noqa: BLE001 — shutdown must not raise
             pass
+
+    def _document_for(self, pitch_id: str) -> str | None:
+        """The raw pitch document B persisted, or None if it was never sent.
+
+        B commits the row (with the document) before it publishes the completion
+        event, so by the time C runs the document is already there — unless the
+        pitch predates the feature, in which case it is simply NULL.
+        """
+        row = self.conn.execute(DOCUMENT_SQL, {"pitch_id": pitch_id}).fetchone()
+        return row[0] if row else None
 
     def handle(self, message: pubsub_v1.subscriber.message.Message) -> None:
         """Report on one scored pitch.
@@ -126,8 +146,17 @@ class Reporter:
             )
 
             recommendation = recommend(completed.profile, completed.result)
+
+            # ⚠️ The analyst is an independent SECOND OPINION, never the grade.
+            # It reads the raw document B persisted; if there is no document or
+            # the model is unavailable, `advisory` is None and the deterministic
+            # report is rendered regardless — the analyst is decision support,
+            # not a dependency. ➡️ advisor.py
+            document = self._document_for(pitch_id)
+            advisory = self.advisor.opine(document, completed.profile, completed.result) if document else None
+
             report_md = render_report(
-                pitch_id, completed.profile, completed.result, recommendation
+                pitch_id, completed.profile, completed.result, recommendation, advisory
             )
 
             cursor = self.conn.execute(
@@ -135,6 +164,7 @@ class Reporter:
                 {
                     "pitch_id": pitch_id,
                     "recommendation": recommendation.model_dump_json(),
+                    "advisory": advisory.model_dump_json() if advisory else None,
                     "report_md": report_md,
                 },
             )
@@ -144,12 +174,19 @@ class Reporter:
                     "one before publishing"
                 )
 
+            if advisory is not None:
+                analyst = f"analyst {advisory.model} → {advisory.grade}/{advisory.stance.value}"
+            elif document is None:
+                analyst = "analyst skipped (no document)"
+            else:
+                analyst = "analyst unavailable"
             log.info(
-                "📝 rendered %s — %s, %d de-risk action(s), %d chars",
+                "📝 rendered %s — %s, %d de-risk action(s), %d chars, %s",
                 pitch_id,
                 recommendation.tier.value,
                 len(recommendation.de_risk_actions),
                 len(report_md),
+                analyst,
             )
             if completed.result.insufficient_information:
                 log.warning(

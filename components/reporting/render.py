@@ -30,7 +30,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from components.scoring.rules import CROWDING_SAMPLE
-from shared.schemas import FitmentResult, PitchProfile, Recommendation
+from shared.schemas import AdvisoryOpinion, FitmentResult, PitchProfile, Recommendation
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -128,14 +128,21 @@ def render_report(
     profile: PitchProfile,
     result: FitmentResult,
     recommendation: Recommendation,
+    advisory: AdvisoryOpinion | None = None,
 ) -> str:
-    """The evidence report, as Markdown."""
+    """The evidence report, as Markdown.
+
+    ⚠️ `advisory` is the LLM analyst's subjective second opinion, or None when
+    it was skipped or unavailable. It renders as its own clearly-labelled
+    section and NEVER changes the deterministic grade above it.
+    """
     template = _environment().get_template("report.md.j2")
     return template.render(
         pitch_id=pitch_id,
         profile=profile,
         result=result,
         recommendation=recommendation,
+        advisory=advisory,
         comps=result.comparables[:COMPS_SHOWN],
         comps_total=len(result.comparables),
         comps_shown=COMPS_SHOWN,
