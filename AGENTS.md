@@ -60,12 +60,19 @@ The requirement is 3 of 4 — Pub/Sub, Cloud SQL, and Memorystore satisfy it. Cl
 
 ```
 components/{intake,scoring,reporting}/   # the three deployable processes
-shared/                                  # pydantic schemas: pitch_profile, fitment_result
-data/                                    # Kaggle -> Cloud SQL ETL, SteamSpy enrichment client
-infra/                                   # Pulumi stack (TypeScript) at the root; systemd/ units alongside
+  scoring/rules.py                       #   pure functions — the implementation of docs/SCORING.md
+  scoring/corpus.py                      #   the only code that touches Postgres
+  scoring/main.py                        #   pull subscriber, persistence, lifecycle
+shared/                                  # pydantic schemas: PitchProfile, FitmentResult, PriceTier
+data/raw/                                # gitignored — the Kaggle export lands here
+data/etl/load_corpus.py                  # streams the export into steam_titles
+data/etl/calibrate.py                    # measures the scoring constants against real data
+data/etl/validate_scoring.py             # winners-vs-random cohort test — the gate for any new sub-score
+data/migrations/                         # Alembic; `alembic upgrade head` from the repo root
+infra/                                   # Pulumi stack (TypeScript); scripts/ and systemd/ alongside
 samples/                                 # example pitch documents (strong and weak)
 tests/
-docs/                                    # ARCHITECTURE, DEPLOYMENT, SCREENSHOTS, AI_USAGE_LOG
+docs/                                    # SCORING, ARCHITECTURE, DEPLOYMENT, SCREENSHOTS, AI_USAGE_LOG
 ```
 
 ## Conventions
@@ -74,6 +81,8 @@ docs/                                    # ARCHITECTURE, DEPLOYMENT, SCREENSHOTS
 
 - **Python 3.11+.** Each component is independently invocable and independently testable.
 - Components exchange **schema-validated JSON** (pydantic models in `shared/`). Never pass ad-hoc dicts across a component boundary.
+- ➡️ **`docs/SCORING.md` is the specification for Component B.** Change it there before changing `components/scoring/rules.py`, and re-run `data/etl/validate_scoring.py` after touching any constant.
+- ⚠️ **A new sub-score must separate winners from random titles before it earns weight.** Two have already failed this — `competitive_headroom` (deleted) and `differentiation` (kept, weight 0). Measuring a metric's distribution says nothing about whether it predicts anything; only the cohort test does.
 - **Deterministic first, LLM as a swappable upgrade.** Every stage where a model could help has a deterministic implementation and, optionally, an LLM implementation behind the same interface — both emitting the same pydantic model. The deterministic path is not a placeholder; it is the reproducible **control** the LLM path is measured against.
 - **The scoring arithmetic itself stays deterministic in both parts.** That is the constraint that matters: a change in grade must be attributable to extraction or comp selection, never to model drift. ➡️ `docs/SCORING.md`
 - Component A's LLM provider is **switchable** via config: `anthropic`, `gemini`, or `fixture`. The `fixture` provider returns a canned `pitch_profile` so B and C are fully developable and testable with no API key and no network.

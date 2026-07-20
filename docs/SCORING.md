@@ -234,3 +234,35 @@ All live in one module so they are tunable without touching the rules.
 
 - **`BOXLEITER_MULTIPLIER` shifts everything together.** It is a community heuristic, not a measurement, so absolute hit rates are soft. Comparisons *between* niches are sound; the claim "8% of entrants succeed" is not precise.
 - **The corpus excludes 53,128 review-less records.** What remains is titles that shipped *and got noticed*, so games that launched into silence are underrepresented and every hit rate is biased **upward**. Both belong in the report's disclosed assumptions.
+
+## 🔍 Methodology — how these numbers were arrived at
+
+Recorded because the constants above cannot justify themselves, and because three of these mistakes cost real time.
+
+### Measure on the population production actually uses
+
+`competitive_headroom` and `sales_potential` were first calibrated against niches defined as "titles sharing ≥2 tags" — thousands of loosely-related games. Production builds comp sets as *top 50 by similarity above the floor*. Re-measuring on real comp sets changed `sales_potential`'s spread from **1.86× to 62.3×**. Same metric, same corpus, right population. A constant fitted to the wrong population is simply a wrong constant.
+
+### A sub-score can be well-formed and carry zero information
+
+Both `competitive_headroom` and `differentiation` had sound mechanisms, clean implementations, and plausible distributions. Neither separated winners from random titles. **Calibration never caught either one** — measuring a metric's distribution says nothing about whether it predicts the outcome you care about. Only the winners-vs-random cohort test in `validate_scoring.py` exposed them.
+
+➡️ Any new sub-score must pass that test before it earns weight.
+
+### Calibration must import the production code
+
+An earlier `validate_scoring.py` reimplemented the similarity function. It had already silently diverged from `rules.py` — production uniform-weights the pitch side (a pitch carries no tag votes) and normalises both, which is a different scale from what the constants were originally fitted against. The validator now imports `components.scoring.rules` directly. A calibration that measures a copy of the rules measures the wrong thing.
+
+### Synthetic pitches are optimistic
+
+Calibration uses real titles as stand-in pitches, which gives hundreds of plausible, correctly-vocabularied inputs for free. But a real title carries a **complete** tag set, where a real design document extracts sparsely. Every threshold fitted this way is therefore biased **high** — `SIMILARITY_FLOOR` most of all. Re-check against `samples/` once Component A's extractor exists.
+
+### Do not normalise away the base rate
+
+Percentile-anchoring each sub-score was considered and rejected. It would put the median pitch at ~50 instead of ~25, which looks healthier and is grade inflation by construction: it destroys the absolute signal a publisher needs and makes "this niche beats 60% of niches" replace "8% of entrants here clear 10k units." You can rationally pass on all of them. **Most pitches should fail.**
+
+### Constants drift when their dependencies move
+
+The completeness caps were written as 85/75/65 against grade thresholds of 90/80/70/60. When validation moved the thresholds to 80/68/55/40, "cap an incomplete pitch at D" silently became a cap at C. Caps and thresholds now sit adjacent in `rules.py` with a comment binding them. Similarly, the estimation method flipped from owner bands to Boxleiter *after* the data arrived — see step 2.
+
+➡️ When a value depends on another value, put them next to each other and say so.
