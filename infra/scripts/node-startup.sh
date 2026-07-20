@@ -63,7 +63,9 @@ echo "✅ Network is up"
 echo "📦 Installing base packages..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip curl ca-certificates
+# rsync is required by infra/scripts/deploy.sh and is NOT in the Debian cloud
+# image — without it every deploy fails with "remote command not found".
+apt-get install -y -qq python3 python3-venv python3-pip curl ca-certificates rsync
 echo "✅ Python: $(python3 --version)"
 
 #-----------------------------------------------------------------------------

@@ -27,6 +27,14 @@ ExecStart=/opt/gliq/.venv/bin/python -m components.reporting.main
 Restart=on-failure
 RestartSec=5s
 
+# Stop flapping. Without a start limit a component that crashes on boot
+# restarts every 5s forever — an early stub racked up 163 restarts before
+# anyone looked. Five failures inside 5 minutes puts the unit in `failed`,
+# where `systemctl status` reports it plainly instead of burying the cause
+# in a scrolling journal.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

@@ -111,6 +111,25 @@ STAMP="$(date -Is)"
 echo "🚀 Deploying ${SHA} to: ${TARGETS[*]}"
 
 #-----------------------------------------------------------------------------
+# EnvironmentFile
+#-----------------------------------------------------------------------------
+# Generated once, locally, from Pulumi stack outputs, then shipped to every
+# node. It is generated here rather than on the VM because it derives from the
+# stack, and infra/ is deliberately excluded from the sync — a node has no
+# Pulumi and no business having it.
+
+ENV_FILE="${SSH_CTL_DIR}/gliq.env"
+
+echo "🔒 Generating env file from stack outputs..."
+if python3 infra/env-from-stack.py --target "${ENV_FILE}" --no-secrets; then
+    echo "✅ Env file generated"
+else
+    echo "⚠️ Could not generate the env file from the Pulumi stack."
+    echo "   Units will fail to start without /etc/gliq/gliq.env."
+    rm -f "${ENV_FILE}"
+fi
+
+#-----------------------------------------------------------------------------
 # Deploy
 #-----------------------------------------------------------------------------
 # rsync as root: /opt/gliq is owned by the unprivileged `gliq` service user, so
@@ -132,6 +151,15 @@ deploy_one() {
         return 1
     fi
 
+    # rsync must exist on BOTH ends — it is not in the Debian cloud image.
+    # node-startup.sh installs it, but a node bootstrapped before that change
+    # will not have it, so repair it here rather than failing the deploy.
+    if ! ssh_do "root@${vm}" "command -v rsync >/dev/null"; then
+        echo "⚠️ rsync missing on ${vm} — installing"
+        ssh_do "root@${vm}" "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync" \
+            || { echo "❌ Could not install rsync on ${vm}"; return 1; }
+    fi
+
     # --delete so a file removed locally is removed on the VM. Without it a
     # renamed module leaves its old copy behind and can still be imported.
     # infra/ is excluded: Pulumi and node_modules have no business on a node.
@@ -148,13 +176,31 @@ deploy_one() {
         --exclude '.pytest_cache/' \
         --exclude '*.egg-info/' \
         --exclude 'WIP*.md' \
-        ./ "root@${vm}:${REMOTE_DIR}/"
+        ./ "root@${vm}:${REMOTE_DIR}/" \
+        || { echo "❌ rsync to ${vm} failed"; return 1; }
 
-    ssh_do "root@${vm}" "printf '%s\n%s\n' '${SHA}' '${STAMP}' > ${REMOTE_DIR}/VERSION"
+    ssh_do "root@${vm}" "printf '%s\n%s\n' '${SHA}' '${STAMP}' > ${REMOTE_DIR}/VERSION" \
+        || { echo "❌ Could not stamp VERSION on ${vm}"; return 1; }
+
+    # The systemd EnvironmentFile. Generated locally because it comes from
+    # Pulumi stack outputs and infra/ is deliberately not synced to the nodes.
+    # Without this the unit cannot start at all — systemd treats a missing
+    # EnvironmentFile as a hard failure, which is what "unavailable resources"
+    # means in `systemctl status`.
+    if [ -f "${ENV_FILE}" ]; then
+        echo "🔒 Installing /etc/gliq/gliq.env..."
+        scp_do -q "${ENV_FILE}" "root@${vm}:/etc/gliq/gliq.env" \
+            || { echo "❌ Could not copy env file to ${vm}"; return 1; }
+        # Readable by the service user, nobody else. It holds credentials.
+        ssh_do "root@${vm}" "chown root:gliq /etc/gliq/gliq.env && chmod 0640 /etc/gliq/gliq.env" \
+            || { echo "❌ Could not set env file permissions on ${vm}"; return 1; }
+    else
+        echo "⚠️ No local env file — skipping (the unit will fail to start)"
+    fi
 
     # Dependencies, only on request.
     if [ "${INSTALL_DEPS}" -eq 1 ]; then
-        echo "📦 Installing ${component} dependencies..."
+        echo "📦 Installing ${component} dependencies (slow on an e2-small)..."
         ssh_do "root@${vm}" "
             set -e
             if [ ! -d ${VENV} ]; then
@@ -163,7 +209,7 @@ deploy_one() {
             fi
             ${VENV}/bin/pip install --quiet --upgrade pip
             ${VENV}/bin/pip install --quiet -e '${REMOTE_DIR}[${component}]'
-        "
+        " || { echo "❌ Dependency install failed on ${vm}"; return 1; }
         echo "✅ Dependencies installed"
     elif ! ssh_do "root@${vm}" "[ -x ${VENV}/bin/python ]"; then
         # Bootstrap does not create the venv, so a first deploy to a fresh node
@@ -176,29 +222,38 @@ deploy_one() {
 
     # Ownership last: everything above ran as root and would otherwise leave
     # root-owned files that the `gliq` service user cannot read.
-    ssh_do "root@${vm}" "chown -R gliq:gliq ${REMOTE_DIR}"
+    ssh_do "root@${vm}" "chown -R gliq:gliq ${REMOTE_DIR}" \
+        || { echo "❌ Could not chown ${REMOTE_DIR} on ${vm}"; return 1; }
 
     # Install/refresh the unit file, then restart.
     local unit="gliq-${component}"
     [ "${component}" = "reporting" ] && unit="gliq-report"
 
     echo "🔧 Installing ${unit}.service..."
-    scp_do -q "infra/systemd/${unit}.service" "root@${vm}:/etc/systemd/system/${unit}.service"
-    ssh_do "root@${vm}" "systemctl daemon-reload && systemctl enable --quiet ${unit} 2>/dev/null || true"
+    scp_do -q "infra/systemd/${unit}.service" "root@${vm}:/etc/systemd/system/${unit}.service" \
+        || { echo "❌ Could not install ${unit}.service on ${vm}"; return 1; }
+    ssh_do "root@${vm}" "systemctl daemon-reload && systemctl enable --quiet ${unit}" \
+        || { echo "❌ Could not enable ${unit} on ${vm}"; return 1; }
 
     echo "🔧 Restarting ${unit}..."
+    # A failed start is NOT a failed deploy: the code is on the node and the
+    # unit is installed. It is reported separately in the summary so the
+    # distinction stays visible instead of being rounded off to success.
     ssh_do "root@${vm}" "systemctl restart ${unit}" || true
 
-    # Show the outcome here rather than making the operator SSH in to find out.
     sleep 2
     echo ""
-    ssh_do "root@${vm}" "systemctl is-active --quiet ${unit}" \
-        && echo "✅ ${unit} is active" \
-        || echo "⚠️ ${unit} is not active — recent log:"
+    if ssh_do "root@${vm}" "systemctl is-active --quiet ${unit}"; then
+        echo "✅ ${unit} is active"
+    else
+        echo "⚠️ ${unit} is not active — recent log:"
+        INACTIVE+=("${unit}")
+    fi
     ssh_do "root@${vm}" "journalctl -u ${unit} -n 15 --no-pager -o cat" | sed 's/^/     /'
 }
 
 FAILED=()
+INACTIVE=()
 for component in "${TARGETS[@]}"; do
     deploy_one "${component}" || FAILED+=("${component}")
 done
@@ -209,10 +264,21 @@ done
 
 echo ""
 echo "───────────────────────────────────────────────"
-if [ ${#FAILED[@]} -eq 0 ]; then
-    echo "✅ Deployed ${SHA} to ${#TARGETS[@]} node(s) at ${STAMP}"
-else
-    echo "❌ Failed on: ${FAILED[*]}"
-    echo "✅ Succeeded on $(( ${#TARGETS[@]} - ${#FAILED[@]} )) of ${#TARGETS[@]} node(s)"
+
+SUCCEEDED=$(( ${#TARGETS[@]} - ${#FAILED[@]} ))
+
+if [ ${#FAILED[@]} -gt 0 ]; then
+    echo "❌ Deploy FAILED on: ${FAILED[*]}"
+    echo "   Succeeded on ${SUCCEEDED} of ${#TARGETS[@]} node(s)"
     exit 1
+fi
+
+echo "✅ Deployed ${SHA} to ${SUCCEEDED} node(s) at ${STAMP}"
+
+# Reported, never folded into the exit code: during early development the
+# components are stubs and are *expected* to exit immediately. Saying so
+# plainly beats both a false ✅ and a misleading ❌.
+if [ ${#INACTIVE[@]} -gt 0 ]; then
+    echo "⚠️ Not running: ${INACTIVE[*]}"
+    echo "   Expected while the components are stubs; check the logs above."
 fi
