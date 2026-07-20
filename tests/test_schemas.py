@@ -26,7 +26,7 @@ def _profile() -> PitchProfile:
         tags=["2D", "Hand-drawn", "Exploration"],
         core_mechanics=["double jump", "ability gating"],
         art_style="hand-drawn 2D",
-        price_tier=PriceTier.STANDARD,
+        price_tier=PriceTier.P19_99,
         target_platforms=["Windows", "Switch"],
         extracted_by="fixture",
     )
@@ -39,7 +39,6 @@ def _result() -> FitmentResult:
         sub_scores=SubScores(
             niche_hit_rate=81.0,
             sales_potential=74.0,
-            competitive_headroom=62.0,
             price_alignment=97.0,
         ),
         comparables=[
@@ -107,7 +106,6 @@ def test_insufficient_information_is_distinct_from_a_low_score():
         sub_scores=SubScores(
             niche_hit_rate=0.0,
             sales_potential=0.0,
-            competitive_headroom=0.0,
             price_alignment=0.0,
         ),
         comps_considered=0,
@@ -118,6 +116,35 @@ def test_insufficient_information_is_distinct_from_a_low_score():
     )
     assert result.insufficient_information
     assert result.grade == "F"
+
+
+def test_price_tiers_ladder_is_ordered_and_complete():
+    """`.index` is the unit price_alignment scores in, so order is load-bearing."""
+    tiers = list(PriceTier)
+    assert [t.index for t in tiers] == list(range(len(tiers)))
+    # Monotonically increasing price points — a reordering of the enum body
+    # would silently change what a rung-distance means.
+    points = [t.price_point for t in tiers]
+    assert points == sorted(points)
+    assert PriceTier.FREE.index == 0
+    assert PriceTier.FREE.price_point == 0.0
+
+
+def test_price_maps_onto_the_right_rung():
+    cases = [
+        (None, None),
+        (0.0, PriceTier.FREE),
+        (0.99, PriceTier.P0_99),
+        (1.00, PriceTier.P1_99),   # just over a rung falls to the next one up
+        (3.99, PriceTier.P3_99),
+        (9.99, PriceTier.P9_99),
+        (10.00, PriceTier.P11_99),
+        (14.99, PriceTier.P14_99),
+        (59.99, PriceTier.P99_99),
+        (250.0, PriceTier.P100_PLUS),
+    ]
+    for price, expected in cases:
+        assert PriceTier.from_price(price) is expected, price
 
 
 def test_investment_tiers_are_stable():

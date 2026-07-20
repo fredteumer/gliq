@@ -27,10 +27,22 @@ For each candidate title in `steam_titles`, similarity to the pitch:
 
 | Component | Weight | Measure |
 | :--- | :---: | :--- |
-| Primary genre | 0.40 | 1.0 exact match, 0.5 if it appears in the title's other genres, else 0 |
-| Tags | 0.35 | Jaccard overlap of tag sets |
+| Tags | **0.55** | Vote-weighted overlap (below) |
+| Primary genre | **0.20** | 1.0 exact match, else 0 |
 | Sub-genres | 0.15 | Jaccard overlap |
 | Platforms | 0.10 | Jaccard overlap |
+
+⚠️ Genre was originally 0.40 and tags 0.35. Calibration showed the floor **never bound**: a flat `0.40 × 1.0` on any genre match cleared every floor ≤ 0.40 regardless of tags, so `MAX_COMPS` was silently doing all the selection and comp sets held ~33,000 titles at every floor from 0.25 to 0.50. Genres are also enormous — "Action" is 35,470 titles — where tags are specific (452 distinct). The discriminating signal now carries the weight it earns.
+
+**Vote-weighted tag overlap.** Steam tags carry vote counts (`{'Turn-Based Strategy': 86, 'Indie': 2}`), stored in `steam_titles.tag_votes`:
+
+```
+inter = Σ min(pitch_votes[t], cand_votes[t])   for t in shared tags
+union = Σ pitch_votes + Σ cand_votes - inter
+score = inter / union
+```
+
+Plain Jaccard treats a tag voted 86 times identically to one voted twice, which is how ubiquitous tags like *Indie* come to dominate a comp set. Weighting by shared votes fixes that without maintaining a stopword list.
 
 Then scaled by **recency**, because an old comparable is weaker evidence about today's market:
 
@@ -42,9 +54,11 @@ Then scaled by **recency**, because an old comparable is weaker evidence about t
 
 Recency is applied here rather than as a sub-score on purpose: a niche with a high hit rate but nothing successful in five years then scores low automatically, with no extra dimension needed.
 
-- **Similarity floor:** 0.25. Below this a title is not a comparable.
-- **Cap:** top 50 by similarity. Recorded in `FitmentResult.comps_considered`.
-- If fewer than 5 comps clear the floor, the result carries an assumption noting the thin comp set.
+- **`SIMILARITY_FLOOR = 0.45`** — measured distribution is p50 0.31, p90 0.43, p99 0.55. At 0.45, 149 of 150 sample pitches produce a full 50-title comp set.
+- **`MAX_COMPS = 50`**, top by similarity. Recorded in `FitmentResult.comps_considered`.
+- Fewer than 5 comps clear the floor → the result carries an assumption noting the thin comp set.
+
+⚠️ The floor is calibrated on **synthetic pitches derived from real titles**, which carry complete tag sets. A real design document will extract sparser, match worse, and clear fewer comps — so this floor is biased slightly high. Re-check against `samples/` once Component A exists.
 
 ## Step 2 — Units, not dollars
 
@@ -72,60 +86,64 @@ is_hit = estimated_units >= SUCCESS_UNITS      # 10_000
 
 ## Step 3 — Sub-scores
 
-Each 0–100. Raw crowding is deliberately **not** a signal: 10,000 titles in a genre where most clear the bar is a healthy market, and 200 where almost none do is a graveyard. What matters is the *rate*, the *size*, and whether the space is *winnable*.
+Each 0–100. Raw crowding is deliberately **not** a signal: 10,000 titles in a genre where most clear the bar is a healthy market, and 200 where almost none do is a graveyard. What matters is the *rate* at which entrants succeed and the *size* of the wins available.
 
 ### `niche_hit_rate` — what fraction of entrants succeed
 
 ```
-hit_rate = comps with estimated_units >= SUCCESS_UNITS / total comps
-score    = hit_rate × 100
+score = 100 × (comps with estimated_units >= SUCCESS_UNITS) / total comps
 ```
 
-`SUCCESS_UNITS = 10_000` (configurable). The core signal.
+`SUCCESS_UNITS = 10_000`. The strongest measured signal: **8.0 for random titles vs 38.0 for known winners.**
+
+⚠️ Reported on an **absolute** scale, not normalised to the corpus. The median real comp set has an 8% hit rate, so most pitches score low here — and that is correct. Most Steam releases do not clear 10,000 units. Rescaling that to make the median pitch look average would be grade inflation, and would destroy exactly the discrimination a publisher needs.
 
 ### `sales_potential` — how large the wins are
 
-Rate is not size: a 95% hit rate where the winners move 11,000 units each is still a small business. Uses the **median `estimated_units` of the successful comps**, mapped on a log scale, since game sales are power-law distributed and a linear scale would collapse everything beneath the outliers.
+Rate is not size: a niche where 40% of entrants clear 10k but nothing ever exceeds 30k is a small business. Uses the **p90 of `estimated_units` among the successful comps**, log-scaled.
 
 ```
-score = 100 × (log10(median_success_units) - log10(1_000)) / (log10(1_000_000) - log10(1_000))
+score = 100 × (log10(p90_winner_units) - log10(23_250)) / (log10(1_449_000) - log10(23_250))
 ```
 
-Clamped to 0–100. 1k units → 0, 1M units → 100.
+Clamped 0–100. Separates **17.4 random vs 56.8 winners.**
 
-### `competitive_headroom` — is the space winnable
+💡 p90, not median. A median over a set already thresholded at ≥10k is structurally stable — it spread only 1.33× across niches, scoring everything ~55. p90 spreads 62× and asks the better question: *how big can a hit get here?*
 
-Rate is not winnability: 95% of comps might clear the bar while three titles hold most of the units, leaving a newcomer the tail rather than the average. Measured as the **Gini coefficient of `estimated_units` across the comp set**:
-
-```
-score = 100 × (1 - gini)
-```
-
-⏳ **Needs calibration against the real corpus.** Game sales are power-law distributed, so a *healthy* niche may sit at Gini 0.6–0.8 — meaning the raw mapping will compress every score into a narrow band. Once the ETL has loaded `steam_titles`, rescale against the observed distribution across genres rather than against the theoretical 0–1 range. Until then this sub-score is directionally right and numerically untuned.
+⚠️ The bracket is the observed p05..p95 of real comp sets, so roughly 5% of niches clip at 100. Widening it would compress the range where nearly all pitches actually sit.
 
 ### `price_alignment` — does the pitch price fit the niche
 
-The one place list price is used — and legitimately, because it compares a pitch's asking price against comparable titles' asking prices. No estimation is involved, and no revenue is inferred.
+Scored in **rung distance** on the `PriceTier` ladder, not dollars — Steam prices are charm-pricing rungs, and $9.99 → $11.99 is a psychological step that a $2.00 delta understates.
 
-Compares the pitch's `price_tier` midpoint against the `price_usd` distribution of the **successful** comps:
+```
+distance = |pitch_tier.index - median(comp_tier.index)|
+score    = max(0, 100 - 12.5 × distance)
+```
 
-| Pitch price sits | Score |
-| :--- | :---: |
-| Within [p25, p75] | 100 |
-| Between p75 and p90 | linear 100 → 60 |
-| Above p90 | 40, decaying to 0 at 2× p90 |
-| Below p25 | 80 — underpricing leaves money on the table, but rarely kills a title |
+⚠️ **This is a guard rail, not a success predictor, and its silence is correct.** It scores ~87 for both random and winning titles, because real shipped games are priced sensibly for their niches. It fires when a pitch asks $49.99 in a $3.99 niche. Do not "fix" its low variance.
 
-Asymmetric on purpose: overpricing relative to a niche is a materially bigger risk than underpricing.
+### ⛔ `competitive_headroom` — specified, built, removed
+
+An inverse-concentration score ("is this space locked up by incumbents?") was built and then dropped. Validation against 120 winners vs 120 random titles showed **18.2 vs 19.7** — no separation, marginally inverted.
+
+The reason is structural: measured as top-10 share of a 50-title comp set, and game sales are power-law distributed, so the top 10 hold most of the units in *every* niche. Worse, a winner is frequently the very title concentrating its own niche, so the measure penalised exactly the pitches worth finding.
+
+The question is real; top-10 share does not answer it. It is still **computed and reported** by `data/etl/validate_scoring.py` but carries zero weight, so the decision stays falsifiable.
+
+🛑 **Known blind spot:** nothing in Part 1 now measures competitive lock-in. A niche with a strong hit rate and a high ceiling that is wholly owned by two publishers will score well. A natural job for the Part 2 LLM pass, which can read a comp set and judge whether incumbents are beatable in a way a ratio cannot.
 
 ## Step 4 — Weighted total
 
 | Sub-score | Weight |
 | :--- | :---: |
-| `niche_hit_rate` | 0.35 |
-| `sales_potential` | 0.25 |
-| `competitive_headroom` | 0.25 |
+| `niche_hit_rate` | **0.45** |
+| `sales_potential` | **0.40** |
 | `price_alignment` | 0.15 |
+
+Tilted toward `sales_potential` relative to a pure rate measure: the brief is winners who win **big**, and a high-rate niche full of modest successes is the safe-but-small bet a publisher chasing outliers should deprioritise.
+
+⏳ These weights remain an **editorial judgement, not a derived number**. Calibration can show what a metric's distribution looks like; it cannot say how much success rate should matter relative to ceiling. There is no ground truth in this corpus to fit against — no labelled good and bad greenlight decisions. Fitting them to maximise the winners-vs-random gap would be fitting noise.
 
 ## Step 5 — Completeness cap
 
@@ -150,24 +168,47 @@ When a cap applies, `FitmentResult.assumptions` states which fields were missing
 
 | Score | Grade | Investment tier |
 | :---: | :---: | :--- |
-| ≥ 90 | A | `greenlight` |
-| ≥ 80 | B | `greenlight` |
-| ≥ 70 | C | `conditional` |
-| ≥ 60 | D | `de_risk` |
-| < 60 | F | `pass` |
+| ≥ 80 | A | `greenlight` |
+| ≥ 68 | B | `greenlight` |
+| ≥ 55 | C | `conditional` |
+| ≥ 40 | D | `de_risk` |
+| < 40 | F | `pass` |
+
+**Deliberately harsh.** Anchored to the measured distributions below, not chosen to produce a pleasant spread of grades. Under these thresholds a randomly sampled Steam title lands in D or F about three quarters of the time, and fewer than 10% reach B. That is the intended behaviour for an acquisitions filter: the base rate of good investments is genuinely low, and a tool that says no to most of its inbox is working.
+
+## Validation
+
+`data/etl/validate_scoring.py` scores two cohorts through the full rules — 120 uniformly sampled titles, and 120 from the top units decile — and checks that winners separate from slop.
+
+| Cohort | p10 | p25 | p50 | p75 | p90 | max |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| RANDOM | 12.0 | 15.0 | **24.1** | 42.0 | 56.3 | 85.3 |
+| WINNERS | 30.1 | 40.9 | **49.6** | 65.8 | 76.4 | 100.0 |
+
+**+25.5 separation at the median, and the top of the scale is reachable.**
+
+⚠️ What this does and does not prove. It shows the rules rank market opportunity in the right direction. It does **not** show they predict whether a given pitch succeeds — every sub-score is computed from the comp set, so two pitches selecting the same comps score nearly identically regardless of their own merits. **Part 1 grades the niche, not the pitch.** That boundary is deliberate, and it is precisely what the Part 2 LLM pass exists to cross.
 
 ## Constants
 
-All live in one module so they are tunable without touching the rules, and so the write-up can state them in a table.
+All live in one module so they are tunable without touching the rules.
 
-| Constant | Value | Status |
+| Constant | Value | Basis |
 | :--- | :--- | :--- |
-| `SIMILARITY_FLOOR` | 0.25 | ⏳ calibrate |
-| `MAX_COMPS` | 50 | |
-| `MIN_COMPS_WARN` | 5 | |
-| `SUCCESS_UNITS` | 10_000 | configurable |
-| `POTENTIAL_UNITS_FLOOR` / `_CEILING` | 1_000 / 1_000_000 | ⏳ calibrate |
-| `RECENCY_FULL_YEARS` / `RECENCY_FLOOR_YEARS` | 3 / 8 | |
-| Sub-score weights | .35 / .25 / .25 / .15 | ⏳ calibrate |
+| `SIMILARITY_FLOOR` | 0.45 | ✅ calibrated — p90 of observed similarity |
+| `MAX_COMPS` | 50 | ✅ 149/150 pitches fill it |
+| `MIN_COMPS_WARN` | 5 | judgement |
+| `SUCCESS_UNITS` | 10_000 | ✅ your bar; ~$100k-scale at indie pricing |
+| `POTENTIAL_UNITS_FLOOR` / `_CEILING` | 23_250 / 1_449_000 | ✅ observed p05..p95 of real comp sets |
+| `BOXLEITER_MULTIPLIER` | 30 | ⏳ community rule of thumb, not measured |
+| Similarity weights | .55 / .20 / .15 / .10 | ✅ rebalanced after the floor failed to bind |
+| Recency full / floor years | 3 / 8 | ⏳ judgement |
+| Sub-score weights | .45 / .40 / .15 | ⏳ editorial — no ground truth to fit |
+| Grade thresholds | 80 / 68 / 55 / 40 | ✅ anchored to validation distributions |
 
-⏳ Marked constants are **directionally reasoned but numerically untuned**. They are guesses until the corpus is loaded and real pitches are run through. Evaluate outputs against `samples/` (a deliberately strong and a deliberately weak pitch) and adjust — the adjustment is expected, not a failure.
+⏳ items are reasoned but unmeasured. ✅ items were fitted to the loaded corpus via `data/etl/calibrate.py` (fixed `RANDOM_SEED`, so re-running reproduces them).
+
+⚠️ Two standing caveats on every number above:
+
+- **`BOXLEITER_MULTIPLIER` shifts everything together.** It is a community heuristic, not a measurement, so absolute hit rates are soft. Comparisons *between* niches are sound; the claim "8% of entrants succeed" is not precise.
+- **The corpus excludes 53,128 review-less records.** What remains is titles that shipped *and got noticed*, so games that launched into silence are underrepresented and every hit rate is biased **upward**. Both belong in the report's disclosed assumptions.
