@@ -237,7 +237,9 @@ async def submit(
     if title.strip():
         profile.title = title.strip()
 
-    request_id = intake.publish_profile(profile)
+    # ⚠️ `text` is the raw submitted document — carried so Component C's analyst
+    # can read the prose the tag extractor cannot. Same funnel as the JSON API.
+    request_id = intake.publish_profile(profile, document=text)
     log.info(
         "✅ accepted %s via UI (%s) — %s (%s, %d tags)",
         request_id,

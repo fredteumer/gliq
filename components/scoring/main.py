@@ -45,12 +45,18 @@ logging.basicConfig(
 )
 log = logging.getLogger("gliq-scoring")
 
+# ⚠️ `document` is persisted but NEVER read by scoring. B is the write path for
+# the raw pitch text (Component A stays publish-only), and Component C's analyst
+# reads it back from here. The scoring result is a pure function of the profile
+# and the corpus — the document does not enter it. ➡️ migration 0005.
 UPSERT_SQL = """
-    INSERT INTO pitches (pitch_id, status, profile, fitment, title, grade, scored_at)
-    VALUES (%(pitch_id)s, 'scored', %(profile)s, %(fitment)s, %(title)s, %(grade)s, now())
+    INSERT INTO pitches (pitch_id, status, profile, document, fitment, title, grade, scored_at)
+    VALUES (%(pitch_id)s, 'scored', %(profile)s, %(document)s, %(fitment)s,
+            %(title)s, %(grade)s, now())
     ON CONFLICT (pitch_id) DO UPDATE SET
         status = 'scored',
         profile = EXCLUDED.profile,
+        document = EXCLUDED.document,
         fitment = EXCLUDED.fitment,
         title = EXCLUDED.title,
         grade = EXCLUDED.grade,
@@ -59,9 +65,10 @@ UPSERT_SQL = """
 """
 
 FAILURE_SQL = """
-    INSERT INTO pitches (pitch_id, status, profile, error)
-    VALUES (%(pitch_id)s, 'failed', %(profile)s, %(error)s)
-    ON CONFLICT (pitch_id) DO UPDATE SET status = 'failed', error = EXCLUDED.error
+    INSERT INTO pitches (pitch_id, status, profile, document, error)
+    VALUES (%(pitch_id)s, 'failed', %(profile)s, %(document)s, %(error)s)
+    ON CONFLICT (pitch_id) DO UPDATE SET
+        status = 'failed', document = EXCLUDED.document, error = EXCLUDED.error
 """
 
 
@@ -108,6 +115,7 @@ class Scorer:
                 {
                     "pitch_id": pitch_id,
                     "profile": request.profile.model_dump_json(),
+                    "document": request.document,
                     "fitment": result.model_dump_json(),
                     "title": request.profile.title,
                     "grade": result.grade,
@@ -146,6 +154,7 @@ class Scorer:
                     {
                         "pitch_id": pitch_id,
                         "profile": request.profile.model_dump_json(),
+                        "document": request.document,
                         "error": str(exc)[:2000],
                     },
                 )

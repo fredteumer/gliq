@@ -115,13 +115,18 @@ class Intake:
             self.publish_error = str(exc)
             log.error("❌ Pub/Sub publisher unavailable: %s", exc)
 
-    def publish_profile(self, profile: PitchProfile) -> str:
+    def publish_profile(self, profile: PitchProfile, document: str | None = None) -> str:
         """Publish a profile for scoring and return the new pitch id.
 
         The single path a pitch takes to Component B. Both the JSON API and the
         web form funnel through here, so the two cannot drift.
+
+        ⚠️ `document` is the raw submitted text, carried so Component B can
+        persist it and Component C's analyst can read the prose. It is the real
+        document regardless of extractor — `fixture` changes what is extracted,
+        never what the producer actually wrote.
         """
-        request = ScoringRequested(profile=profile)
+        request = ScoringRequested(profile=profile, document=document)
         self.publish(request)
         return str(request.pitch_id)
 
@@ -318,7 +323,7 @@ def submit_pitch(
     if submission.title:
         profile.title = submission.title
 
-    request = ScoringRequested(profile=profile)
+    request = ScoringRequested(profile=profile, document=submission.document)
     current.publish(request)
 
     log.info(
