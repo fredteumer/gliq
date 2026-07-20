@@ -160,3 +160,12 @@ export const dbInstance = database ? database.instance.name : pulumi.output("");
 // the password, and it is already in state either way — exporting it adds no
 // exposure, it just avoids a second source of truth.
 export const dbPassword = database ? config.requireSecret("dbPassword") : pulumi.output("");
+
+// Component A's web UI. Both are optional so a stack that has not set them
+// still deploys — the app treats an unset ADMIN_PASSWORD_HASH as "no valid
+// password", which locks the login gate rather than opening it.
+//
+//   pulumi config set --secret sessionSecret      "$(openssl rand -hex 32)"
+//   pulumi config set --secret adminPasswordHash  '<from infra/scripts/hash-password.py>'
+export const sessionSecret = config.getSecret("sessionSecret") ?? pulumi.output("");
+export const adminPasswordHash = config.getSecret("adminPasswordHash") ?? pulumi.output("");

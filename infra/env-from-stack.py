@@ -74,6 +74,12 @@ OUTPUT_TO_ENV: dict[str, str] = {
     "dbName": "DB_NAME",
     "dbUser": "DB_USER",
     "dbPassword": "DB_PASSWORD",
+    # Component A's web UI. Empty until `pulumi config set --secret` is run for
+    # each; Component A treats an empty ADMIN_PASSWORD_HASH as "no valid
+    # password", so an unconfigured stack locks the login gate rather than
+    # leaving it open.
+    "sessionSecret": "SESSION_SECRET",
+    "adminPasswordHash": "ADMIN_PASSWORD_HASH",
 }
 
 #: Outputs Pulumi marks secret. They are redacted from `pulumi stack output`
