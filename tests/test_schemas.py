@@ -39,6 +39,7 @@ def _result() -> FitmentResult:
         sub_scores=SubScores(
             niche_hit_rate=81.0,
             sales_potential=74.0,
+            differentiation=55.0,
             price_alignment=97.0,
         ),
         comparables=[
@@ -106,6 +107,7 @@ def test_insufficient_information_is_distinct_from_a_low_score():
         sub_scores=SubScores(
             niche_hit_rate=0.0,
             sales_potential=0.0,
+            differentiation=0.0,
             price_alignment=0.0,
         ),
         comps_considered=0,

@@ -153,11 +153,12 @@ def main() -> int:
               f"{pct(s,75):>7.1f} {pct(s,90):>7.1f} {max(s):>7.1f}")
 
     print("\nSub-score medians:")
-    print(f"{'cohort':<9} {'hit':>8} {'potential':>10} {'price':>7} {'comps':>7}")
+    print(f"{'cohort':<9} {'hit':>8} {'potential':>10} {'differ':>8} {'price':>7} {'comps':>7}")
     for label, scored in results.items():
         print(f"{label:<9} "
               f"{statistics.median([r.sub_scores.niche_hit_rate for r in scored]):>8.1f} "
               f"{statistics.median([r.sub_scores.sales_potential for r in scored]):>10.1f} "
+              f"{statistics.median([r.sub_scores.differentiation for r in scored]):>8.1f} "
               f"{statistics.median([r.sub_scores.price_alignment for r in scored]):>7.1f} "
               f"{statistics.median([r.comps_considered for r in scored]):>7.0f}")
 

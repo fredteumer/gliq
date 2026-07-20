@@ -220,6 +220,16 @@ class SubScores(BaseModel):
     #: p90 units among the successful comps: how big a win is available here.
     #: Rate is not size. Separates 3.6x.
     sales_potential: float = Field(ge=0.0, le=100.0)
+    #: How distinct the pitch's position is within its own niche — the mean
+    #: similarity of its closest comps, inverted.
+    #: ⚠️ REPORTED BUT UNWEIGHTED (weight 0). Validation showed no separation
+    #: between winners and random titles (23.7 vs 23.3), because tags cannot
+    #: measure differentiation — two roguelike deckbuilders can share every tag
+    #: and be different games. Kept because "your five closest comparables
+    #: average 0.66 similarity" is a useful, checkable statement for a
+    #: publisher; excluded from the grade because it does not predict outcomes.
+    #: Real differentiation judgement is a Part 2 (LLM) job.
+    differentiation: float = Field(ge=0.0, le=100.0)
     #: Pitch price rung against the comp set's median rung.
     #: ⚠️ Deliberately near-constant on well-priced pitches — it is a guard rail
     #: against mispricing, not a success predictor. Silence is correct.

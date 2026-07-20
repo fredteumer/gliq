@@ -123,15 +123,34 @@ score    = max(0, 100 - 12.5 × distance)
 
 ⚠️ **This is a guard rail, not a success predictor, and its silence is correct.** It scores ~87 for both random and winning titles, because real shipped games are priced sensibly for their niches. It fires when a pitch asks $49.99 in a $3.99 niche. Do not "fix" its low variance.
 
-### ⛔ `competitive_headroom` — specified, built, removed
+### `differentiation` — how crowded is this exact position ⚠️ reported, unweighted
 
-An inverse-concentration score ("is this space locked up by incumbents?") was built and then dropped. Validation against 120 winners vs 120 random titles showed **18.2 vs 19.7** — no separation, marginally inverted.
+The mean similarity of the **5 closest** comps, inverted. If your five nearest neighbours sit at 0.85 you would be the fifty-first near-identical entrant; at 0.45 you are doing something the niche is not.
 
-The reason is structural: measured as top-10 share of a 50-title comp set, and game sales are power-law distributed, so the top 10 hold most of the units in *every* niche. Worse, a winner is frequently the very title concentrating its own niche, so the measure penalised exactly the pitches worth finding.
+```
+crowding = mean(top 5 similarities)
+score    = 100 × (1 - (crowding - 0.35) / (0.75 - 0.35))
+```
 
-The question is real; top-10 share does not answer it. It is still **computed and reported** by `data/etl/validate_scoring.py` but carries zero weight, so the decision stays falsifiable.
+Mean rather than max: one unusually well-tagged neighbour should not re-rate a pitch, but five near-twins is a saturated position.
 
-🛑 **Known blind spot:** nothing in Part 1 now measures competitive lock-in. A niche with a strong hit rate and a high ceiling that is wholly owned by two publishers will score well. A natural job for the Part 2 LLM pass, which can read a comp set and judge whether incumbents are beatable in a way a ratio cannot.
+🛑 **Weight 0.** It was built as a graded element and then unweighted, because validation put it at **23.7 for winners vs 23.3 for random** — no separation, the same failure as `competitive_headroom`. Weighting it at 0.15 also cost real ceiling: the best winner fell from 80.6 to 71.3 and nothing reached an A, since a sub-score sitting at ~23 for *every* pitch simply drags the distribution down.
+
+💡 **Why it failed is the useful part: tags cannot measure differentiation.** Two roguelike deckbuilders can carry identical tags and be entirely different games. This measures whether your *tag neighbourhood* is crowded, not whether you are a clone — and winners turn out to be exactly as tag-crowded as random titles.
+
+It is **retained and reported** rather than deleted, unlike `competitive_headroom`, because it produces a directly checkable statement a publisher wants: *"your five closest comparables average 0.66 similarity, so you would be entering a crowded position."* Useful, and honest about not being predictive.
+
+⚠️ Novelty is not quality either way. A rare position can simply be an idea nobody wanted. Judging whether a differentiator *matters* needs something that reads the pitch. ➡️ Part 2.
+
+### ⛔ `competitive_headroom` — specified, built, deleted
+
+An inverse-concentration score ("is this space locked up by incumbents?"). Validation showed **18.2 winners vs 19.7 random** — no separation, marginally inverted.
+
+Structural cause: measured as top-10 share of a 50-title comp set, and game sales are power-law distributed, so the top 10 hold most of the units in *every* niche. Worse, a winner is frequently the very title concentrating its own niche, so the measure penalised exactly the pitches worth finding.
+
+Removed from the schema entirely, unlike `differentiation`, because top-10 share is not independently reportable — it was only ever a grade input, and a misleading one.
+
+🛑 **Known blind spot:** nothing in Part 1 measures competitive lock-in. A niche with a strong hit rate and a high ceiling wholly owned by two publishers will score well. A natural job for the Part 2 LLM pass, which can read a comp set and judge whether incumbents are beatable in a way a ratio cannot.
 
 ## Step 4 — Weighted total
 
@@ -140,6 +159,7 @@ The question is real; top-10 share does not answer it. It is still **computed an
 | `niche_hit_rate` | **0.45** |
 | `sales_potential` | **0.40** |
 | `price_alignment` | 0.15 |
+| `differentiation` | **0.00** — reported only |
 
 Tilted toward `sales_potential` relative to a pure rate measure: the brief is winners who win **big**, and a high-rate niche full of modest successes is the safe-but-small bet a publisher chasing outliers should deprioritise.
 
@@ -203,7 +223,9 @@ All live in one module so they are tunable without touching the rules.
 | `BOXLEITER_MULTIPLIER` | 30 | ⏳ community rule of thumb, not measured |
 | Similarity weights | .55 / .20 / .15 / .10 | ✅ rebalanced after the floor failed to bind |
 | Recency full / floor years | 3 / 8 | ⏳ judgement |
-| Sub-score weights | .45 / .40 / .15 | ⏳ editorial — no ground truth to fit |
+| Sub-score weights | .45 / .40 / .15 / .00 | ⏳ editorial — no ground truth to fit |
+| `CROWDING_SAMPLE` | 5 | ⏳ judgement |
+| `CROWDING_FLOOR` / `_CEILING` | 0.35 / 0.75 | ⏳ mis-centred — observed median crowding is ~0.66, near the ceiling. Unweighted, so it does not affect grades |
 | Grade thresholds | 80 / 68 / 55 / 40 | ✅ anchored to validation distributions |
 
 ⏳ items are reasoned but unmeasured. ✅ items were fitted to the loaded corpus via `data/etl/calibrate.py` (fixed `RANDOM_SEED`, so re-running reproduces them).

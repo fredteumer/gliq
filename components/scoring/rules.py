@@ -52,9 +52,40 @@ PRICE_PENALTY_PER_RUNG = 12.5
 #: No price on the pitch or no priced comps — neither reward nor punish.
 PRICE_UNKNOWN = 50.0
 
+#: How many of the closest comps define "your position in the niche".
+#:
+#: One near-twin can be coincidence; five means the space is saturated with
+#: your exact idea. Averaging the top few is also less brittle than taking the
+#: single maximum, which one unusually well-tagged comp could dominate.
+CROWDING_SAMPLE = 5
+#: Mean top-CROWDING_SAMPLE similarity mapped onto 0-100. ⏳ see below.
+CROWDING_FLOOR = 0.35
+CROWDING_CEILING = 0.75
+
 WEIGHT_HIT_RATE = 0.45     # ⏳ editorial
 WEIGHT_POTENTIAL = 0.40    # ⏳ tilted toward ceiling: the brief is winners who win BIG
 WEIGHT_PRICE = 0.15        # ⏳
+
+#: ⛔ ZERO on purpose. `differentiation` is still computed and reported — it is
+#: not dead code — but it does not move the grade.
+#:
+#: Validation (120 winners vs 120 random) put it at 23.7 against 23.3: no
+#: separation whatsoever, the same failure as competitive_headroom. Weighting it
+#: at 0.15 also cost real ceiling — the best winner fell from 80.6 to 71.3 and
+#: no title reached an A, because a sub-score that sits at ~23 for EVERY pitch
+#: just drags the whole distribution down.
+#:
+#: The reason it fails is worth keeping: tags cannot measure differentiation.
+#: Two roguelike deckbuilders can carry identical tags and be entirely different
+#: games, so this measures "is your TAG NEIGHBOURHOOD crowded", not "are you a
+#: clone". Winners turn out to be exactly as tag-crowded as random titles.
+#:
+#: It is retained at weight 0 rather than deleted because it yields a
+#: directly reportable fact — "your five closest comparables average 0.66
+#: similarity, so you would be entering a crowded position" — which is useful
+#: to a publisher and honest about not being predictive. Real differentiation
+#: judgement needs something that reads the pitch. ➡️ Part 2.
+WEIGHT_DIFFERENTIATION = 0.0
 
 #: Grade floors. ✅ anchored to the validation distributions.
 GRADE_THRESHOLDS: tuple[tuple[float, str], ...] = (
@@ -216,6 +247,38 @@ def sales_potential(units: Sequence[int]) -> float:
     return max(0.0, min(100.0, 100 * (math.log10(p90) - lo) / (hi - lo)))
 
 
+def differentiation(similarities: Sequence[float]) -> float:
+    """How distinct the pitch's position is within its own niche.
+
+    ⚠️ The ONLY pitch-level signal in Part 1. Every other sub-score is a
+    property of the comp set, so two different pitches selecting the same comps
+    score identically on them — the system grades the niche, not the game.
+    This asks something about *this pitch specifically*: how many titles are
+    already occupying its exact position?
+
+    Measured as the mean similarity of the closest CROWDING_SAMPLE comps. If
+    your five nearest neighbours sit at 0.85 you would be the fifty-first
+    near-identical entrant; at 0.45 you are doing something the niche is not.
+
+    💡 Recency is already folded into similarity, which is right here: being
+    indistinguishable from five titles released last year is a live competitive
+    problem, while being indistinguishable from five from 2012 is much less so.
+
+    ⚠️ Novelty is NOT quality. A rare position can simply be an idea nobody
+    wanted, and this score cannot tell the difference — judging whether a
+    differentiator actually matters is a Part 2 (LLM) job. What this does
+    deliver is the finding a publisher genuinely wants surfaced: "you would be
+    the 51st entrant doing exactly this."
+    """
+    if not similarities:
+        return PRICE_UNKNOWN  # nothing to compare against; stay neutral
+    closest = sorted(similarities, reverse=True)[:CROWDING_SAMPLE]
+    crowding = sum(closest) / len(closest)
+    span = CROWDING_CEILING - CROWDING_FLOOR
+    scaled = (crowding - CROWDING_FLOOR) / span
+    return max(0.0, min(100.0, 100.0 * (1.0 - scaled)))
+
+
 def price_alignment(pitch_tier: PriceTier | None, comp_prices: Sequence[float]) -> float:
     """Rung distance from the comp set's median price tier.
 
@@ -322,7 +385,12 @@ def score_pitch(profile: PitchProfile, candidates: Iterable[dict], today: date) 
         return FitmentResult(
             score=0.0,
             grade="F",
-            sub_scores=SubScores(niche_hit_rate=0.0, sales_potential=0.0, price_alignment=0.0),
+            sub_scores=SubScores(
+                niche_hit_rate=0.0,
+                sales_potential=0.0,
+                differentiation=0.0,
+                price_alignment=0.0,
+            ),
             comparables=[],
             comps_considered=0,
             completeness=coverage,
@@ -346,12 +414,14 @@ def score_pitch(profile: PitchProfile, candidates: Iterable[dict], today: date) 
     subs = SubScores(
         niche_hit_rate=niche_hit_rate(units),
         sales_potential=sales_potential(units),
+        differentiation=differentiation([sim for sim, _ in comps]),
         price_alignment=price_alignment(profile.price_tier, prices),
     )
 
     uncapped = (
         WEIGHT_HIT_RATE * subs.niche_hit_rate
         + WEIGHT_POTENTIAL * subs.sales_potential
+        + WEIGHT_DIFFERENTIATION * subs.differentiation
         + WEIGHT_PRICE * subs.price_alignment
     )
 
