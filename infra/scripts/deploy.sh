@@ -212,6 +212,14 @@ deploy_one() {
     # --delete so a file removed locally is removed on the VM. Without it a
     # renamed module leaves its old copy behind and can still be imported.
     # infra/ is excluded: Pulumi and node_modules have no business on a node.
+    #
+    # ⚠️ rsync does NOT read .gitignore, so every gitignored-but-bulky path has
+    # to be excluded by hand here. Two that matter: data/raw/ is the ~863MB
+    # Kaggle export (ETL input, never needed on a node) and .venv-etl/ is a
+    # ~239MB host-architecture virtualenv that would be useless on the VM even
+    # if it fitted. Together they were ~1.1GB per node per deploy onto a 20GB
+    # boot disk. Anything else added under data/ should be checked against this
+    # list before the next deploy.
     echo "📤 Syncing..."
     rsync -a --delete --compress \
         -e "ssh ${SSH_OPTS[*]}" \
@@ -220,7 +228,9 @@ deploy_one() {
         --exclude '__pycache__/' \
         --exclude '*.pyc' \
         --exclude '.venv/' \
+        --exclude '.venv-etl/' \
         --exclude '.env' \
+        --exclude 'data/raw/' \
         --exclude 'node_modules/' \
         --exclude '.pytest_cache/' \
         --exclude '*.egg-info/' \

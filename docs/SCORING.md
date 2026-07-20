@@ -34,15 +34,19 @@ For each candidate title in `steam_titles`, similarity to the pitch:
 
 ⚠️ Genre was originally 0.40 and tags 0.35. Calibration showed the floor **never bound**: a flat `0.40 × 1.0` on any genre match cleared every floor ≤ 0.40 regardless of tags, so `MAX_COMPS` was silently doing all the selection and comp sets held ~33,000 titles at every floor from 0.25 to 0.50. Genres are also enormous — "Action" is 35,470 titles — where tags are specific (452 distinct). The discriminating signal now carries the weight it earns.
 
-**Vote-weighted tag overlap.** Steam tags carry vote counts (`{'Turn-Based Strategy': 86, 'Indie': 2}`), stored in `steam_titles.tag_votes`:
+**Vote-weighted tag overlap.** Steam tags carry vote counts (`{'Turn-Based Strategy': 86, 'Indie': 2}`), stored in `steam_titles.tag_votes`. Both sides are normalised to sum to 1, then intersected:
 
 ```
-inter = Σ min(pitch_votes[t], cand_votes[t])   for t in shared tags
-union = Σ pitch_votes + Σ cand_votes - inter
-score = inter / union
+p = normalise({t: 1.0 for t in pitch_tags})     # a pitch has no votes
+c = normalise(cand_votes)
+score = Σ min(p[t], c[t])   for t in shared tags
 ```
 
 Plain Jaccard treats a tag voted 86 times identically to one voted twice, which is how ubiquitous tags like *Indie* come to dominate a comp set. Weighting by shared votes fixes that without maintaining a stopword list.
+
+⚠️ A pitch carries no vote counts — the extractor either found a tag or it did not — so its tags are weighted uniformly. Normalising **both** sides before intersecting is what makes the comparison meaningful: without it, a heavily-tagged candidate scores as *less* similar than a sparsely-tagged one purely because its denominator is bigger. The result is the fraction of tag-weight the two share.
+
+📝 An earlier revision of this document specified a raw-vote `inter / union` form. That is not what `rules.tag_overlap` implements and never was in production; the normalised form above is the code.
 
 Then scaled by **recency**, because an old comparable is weaker evidence about today's market:
 
@@ -174,11 +178,13 @@ The design doc is open-ended, so extraction will often leave fields empty. Compl
 | Condition | Effect |
 | :--- | :--- |
 | `primary_genre` **and** `tags` both empty | ⛔ **F — insufficient information.** No comp set exists, so there is nothing to score. Reported distinctly from a low grade. |
-| Any load-bearing field missing | Hard cap at **65 (D)** |
-| Field coverage < 0.40 | Cap at 65 (D) |
-| Coverage 0.40–0.60 | Cap at 75 (C) |
-| Coverage 0.60–0.80 | Cap at 85 (B) |
+| Any load-bearing field missing | Hard cap at **54** (D — just under C) |
+| Field coverage < 0.40 | Cap at 54 (D) |
+| Coverage 0.40–0.60 | Cap at 67 (C — just under B) |
+| Coverage 0.60–0.80 | Cap at 79 (B — just under A) |
 | Coverage ≥ 0.80 | No cap |
+
+⚠️ The cap values are **derived from the grade thresholds in step 6, not chosen independently**, and each sits just below the next grade boundary. They were originally written as 85/75/65 against thresholds of 90/80/70/60; when validation moved the thresholds to 80/68/55/40, "cap an incomplete pitch at D" silently became a cap at C. `rules.py` now keeps `CAP_B`/`CAP_C`/`CAP_D` adjacent to `GRADE_THRESHOLDS` with a comment binding them — change one and the other must move.
 
 Coverage counts the scoring-relevant fields — `primary_genre`, `sub_genres`, `tags`, `core_mechanics`, `price_tier`, `target_platforms`. `title`, `summary`, and `art_style` are report-only and do not enter coverage, though `title` remains load-bearing for identity.
 
