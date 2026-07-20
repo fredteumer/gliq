@@ -41,11 +41,9 @@ flowchart LR
     B -->|"fitment_result (JSON)"| M[["Pub/Sub<br/>scoring.completed"]]
     M --> C
 
-    DB[("Cloud SQL · PostgreSQL<br/>Steam comps corpus")]
-    RD[("Memorystore · Redis<br/>comp-set cache")]
+    DB[("Cloud SQL · PostgreSQL<br/>corpus · pitches · reports")]
 
-    B <--> RD
-    RD <--> DB
+    B <--> DB
     C --> DB
     C --> R([Grade + recommendation<br/>+ evidence report])
 ```
@@ -62,9 +60,11 @@ flowchart LR
 
 | Category | Service | Why it's needed |
 | :--- | :--- | :--- |
-| **Messaging** | Pub/Sub | Decouples the three processes. Slow LLM extraction never blocks scoring, and scoring never blocks reporting. |
-| **Database** | Cloud SQL (PostgreSQL) | Holds the Steam comps corpus plus every pitch, result, and decision — the audit trail that makes recommendations defensible. |
-| **Caching** | Memorystore (Redis) | Comp-set lookups by genre/tag cluster repeat heavily across pitches. Caching them keeps scoring fast and load off Cloud SQL. |
+| **Queuing** | Pub/Sub — `scoring-requested` | A→B work queue: ack deadline, retry backoff, dead-letter after 5 attempts, competing-consumer pull. B acknowledges only once a pitch is scored and persisted. |
+| **Messaging** | Pub/Sub — `scoring-completed` | B→C event fan-out. B publishes a fact without knowing its consumers, so slow extraction never blocks scoring and scoring never blocks reporting. |
+| **Database** | Cloud SQL (PostgreSQL) | The Steam comps corpus plus every pitch, result, decision and rendered report — the audit trail that makes a recommendation defensible. |
+
+⛔ **No caching layer.** The only plausible cache target is `corpus.fetch_candidates`, and at this system's throughput a Redis instance would exist to be demonstrated rather than used. ➡️ [ARCHITECTURE.md §7](docs/ARCHITECTURE.md) records the reasoning and the counter-argument.
 
 ### Networking
 

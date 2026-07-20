@@ -37,13 +37,14 @@ Three processes, one per VM, coordinated through managed GCP services.
 
 | Category | Service | Role |
 | :--- | :--- | :--- |
-| **Messaging** | Pub/Sub | Topic fan-out. `scoring.completed` events from B to C |
-| **Database** | Cloud SQL (PostgreSQL) | Steam comps corpus, pitch profiles, fitment results, audit trail |
-| **Caching** | Memorystore (Redis) | Comp-set lookups by genre/tag cluster; hot-query cache in front of Cloud SQL |
-| *Queuing (optional 4th)* | Cloud Tasks | A→B work queue. Only if it does not require exposing B publicly |
-| *Storage (optional)* | Cloud Storage | Rendered report artifacts, raw dataset staging |
+| **Queuing** | Pub/Sub `scoring-requested` | A→B work queue. Ack deadline, retry backoff, dead-letter after 5 attempts, competing-consumer pull |
+| **Messaging** | Pub/Sub `scoring-completed` | B→C event fan-out. B publishes a fact without knowing its consumers |
+| **Database** | Cloud SQL (PostgreSQL) | Steam comps corpus, pitch profiles, fitment results, recommendations, rendered reports |
+| *Storage (optional)* | Cloud Storage | Raw dataset staging. ⚠️ Not used for reports — those live in `pitches.report_md` (migration 0004) |
 
-The requirement is 3 of 4 — Pub/Sub, Cloud SQL, and Memorystore satisfy it. Cloud Tasks is a stretch goal, not a dependency.
+The requirement is 3 of 4 and this is **queuing, messaging, and databases**. ➡️ `docs/ARCHITECTURE.md` §7 argues the position in full, including the counter-argument that both patterns run on one service.
+
+⛔ **Caching is not implemented and Memorystore was never provisioned** — a design decision, not a gap. The only plausible cache target is `corpus.fetch_candidates`, and at this system's throughput a Redis instance would exist to be screenshotted. ⛔ **Cloud Tasks is rejected**, not deferred: it delivers over HTTP and would require exposing Component B publicly, breaking the property that only A is reachable.
 
 ### Networking
 
