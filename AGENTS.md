@@ -74,13 +74,16 @@ docs/                                    # ARCHITECTURE, DEPLOYMENT, SCREENSHOTS
 
 - **Python 3.11+.** Each component is independently invocable and independently testable.
 - Components exchange **schema-validated JSON** (pydantic models in `shared/`). Never pass ad-hoc dicts across a component boundary.
-- Component B's scoring is **rule-based and deterministic** — no LLM in the scoring path. This keeps results reproducible and re-gradable.
+- **Deterministic first, LLM as a swappable upgrade.** Every stage where a model could help has a deterministic implementation and, optionally, an LLM implementation behind the same interface — both emitting the same pydantic model. The deterministic path is not a placeholder; it is the reproducible **control** the LLM path is measured against.
+- **The scoring arithmetic itself stays deterministic in both parts.** That is the constraint that matters: a change in grade must be attributable to extraction or comp selection, never to model drift. ➡️ `docs/SCORING.md`
 - Component A's LLM provider is **switchable** via config: `anthropic`, `gemini`, or `fixture`. The `fixture` provider returns a canned `pitch_profile` so B and C are fully developable and testable with no API key and no network.
+- ⚠️ **Missing extracted fields must lower the grade, not raise an exception.** The design document is open-ended, so `PitchProfile` is almost entirely optional by design and decisiveness is enforced in scoring, not in validation. A required field there would mean a sparse pitch dies in Component A and never gets a report.
 
 ### Data
 
 - ⚠️ **Do not commit the Steam dataset.** The Kaggle dataset and the SteamSpy API carry their own licensing terms, separate from this repo's AGPLv3. Commit the **ETL script**, and have setup fetch the data.
-- Sales figures are **estimates**, not audited revenue — Steam does not publish unit sales. Every report must disclose the estimation method (review-count/Boxleiter multiplier, SteamSpy owner bands) as an assumption.
+- Sales figures are **estimates** — Steam does not publish unit sales. Every report must disclose the estimation method (review-count/Boxleiter multiplier, SteamSpy owner bands) as an assumption.
+- ⚠️ **Report units moved, never revenue.** Deriving dollars means multiplying an already-estimated unit count by list price, ignoring discounting, regional pricing, refunds and Steam's cut — stacking a second guess on the first to produce a figure that looks precise and is not. Units carry exactly one layer of estimation error. List price is used only to compare a pitch's asking price against comparable titles' asking prices (`price_alignment`), where nothing is inferred. ➡️ `docs/SCORING.md`
 
 ### Secrets
 

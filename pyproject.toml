@@ -35,6 +35,9 @@ reporting = [
 ]
 etl = [
     "psycopg[binary]>=3.1",
+    # Incremental JSON parsing. The Kaggle export is a single ~863MB object;
+    # json.load() would need several GB resident for a file walked once.
+    "ijson>=3.2",
     # Schema migrations. An OPS dependency, not a runtime one — it pulls in
     # SQLAlchemy, which the components themselves never use (they speak
     # psycopg directly). Kept out of the component extras to keep the VMs lean.
