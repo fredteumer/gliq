@@ -31,9 +31,9 @@ Capture into `docs/evidence/` and embed with `<img src="evidence/NAME.png" width
 
 ## 📸 Ready to capture now (as of 2026-07-20)
 
-Components A and B run end to end, so items **7, 8, 11 and 14 are reachable today** — still ⬜ above because the PNGs have not been taken. The commands below reproduce exactly what was observed, so capture is a matter of running them and screenshotting.
+All three components run end to end, so items **7, 8, 9, 11, 13 and 14 are reachable today** — still ⬜ above because the PNGs have not been taken. The commands below reproduce exactly what was observed, so capture is a matter of running them and screenshotting.
 
-⚠️ Items 5, 6, 9, 12 and 13 remain blocked: nginx/TLS is not configured (so submission is loopback-only for now), Component C is still a stub, and Memorystore is provisioned but unwired.
+⚠️ Items 5, 6 and 12 remain blocked: nginx/TLS is not configured (so submission is loopback-only for now), and Memorystore is provisioned but unwired.
 
 **Submit a pitch** — from the intake VM, since uvicorn binds `127.0.0.1:8000` and nginx is not up yet:
 
@@ -60,19 +60,38 @@ INFO 🔍 scoring 82d5ff2b-… (Hollow Reef)
 INFO ✅ 82d5ff2b-… — D (46.7) from 50 comps
 ```
 
+**Item 9 — C consumes the event and renders:** `journalctl -u gliq-report -n 20 --no-pager`
+
+```
+INFO 📥 consumed 82d5ff2b-… — Hollow Reef (D 46.7)
+INFO 📝 rendered 82d5ff2b-… — de_risk, 1 de-risk action(s), 3326 chars
+WARNING ⚠️ b5a047c3-… reported as INSUFFICIENT INFORMATION, not as a low grade
+```
+
 **Item 11 — corpus + persisted result**, against Cloud SQL over the tailnet:
 
 ```sql
 SELECT count(*) FROM steam_titles;                      -- 82,952
-SELECT title, status, grade, fitment->>'score' FROM pitches ORDER BY scored_at;
+SELECT title, status, grade, recommendation->>'tier', length(report_md)
+  FROM pitches ORDER BY scored_at;
 ```
+
+**Item 13 — the rendered report.** Stored as Markdown in `pitches.report_md`, not as a file:
+
+```sql
+SELECT report_md FROM pitches WHERE title = 'Hollow Reef';
+```
+
+Contains, in order: grade + investment tier, the rationale, de-risk actions, the fitment breakdown ⚠️ with `differentiation` marked **unweighted**, the ranked comps table, and the assumptions block. 💡 For the screenshot, pipe it through a Markdown viewer (`glow`, or paste into any renderer) — it is stored as content precisely so presentation is a display-time choice.
 
 **Item 14 — contrasting verdicts.** Three documents, three distinct outcomes, which also demonstrates the *insufficient information* path as separate from a low grade:
 
-| Document | Grade | Score | Comps | Note |
-| :--- | :---: | ---: | ---: | :--- |
-| `samples/strong-pitch.md` | D | 46.7 | 50 | premium-priced metroidvania |
-| `samples/weak-pitch.md` | B | 75.0 | 9 | free-to-play battle royale |
-| `"We want to make a game."` | F | 0.0 | 0 | ⛔ insufficient information — no comp basis |
+| Document | Grade | Score | Comps | Tier | Note |
+| :--- | :---: | ---: | ---: | :--- | :--- |
+| `samples/strong-pitch.md` | D | 46.7 | 50 | `de_risk` | premium-priced metroidvania |
+| `samples/weak-pitch.md` | B | 75.0 | 9 | `greenlight` | free-to-play battle royale |
+| `"We want to make a game."` | F | 0.0 | 0 | `pass` | ⛔ insufficient information — no comp basis |
+
+💡 The third row is the one worth showing a grader: it renders a visibly *different* report — "Not evaluated", no fitment table, no comps — rather than a zeroed-out scorecard. "We cannot tell" and "we evaluated it and it is bad" are different claims and the system does not conflate them.
 
 ⚠️ The strong/weak grades are **inverted relative to the sample names** — this is a known open issue, not a demo artifact. Do not present these two as evidence of judgement quality until the scoring recalibration lands; they are evidence that the *pipeline* works. ➡️ the recalibration TODO in the WIP file.
