@@ -277,10 +277,22 @@ class InvestmentTier(StrEnum):
 
 
 class Recommendation(BaseModel):
+    """Component C's decision. Persisted to `pitches.recommendation`.
+
+    ⚠️ This is the STRUCTURED decision, not the document. The rendered Markdown
+    lives in `pitches.report_md` (migration 0004) because the two have different
+    lifetimes: a template change re-renders the prose from this, so merging them
+    would let an edit to presentation dirty the decision record.
+
+    ⛔ There is no `report_uri`. An earlier design wrote the report to the
+    artifacts bucket and had Component A serve it back; the report is now stored
+    in Postgres, so a URI field would be permanently None. A UI derives the
+    report's location from `pitch_id`. ➡️ migration 0004.
+    """
+
     tier: InvestmentTier
     rationale: str
     de_risk_actions: list[str] = Field(default_factory=list)
-    report_uri: str | None = None
     generated_at: datetime = Field(default_factory=_now)
 
 

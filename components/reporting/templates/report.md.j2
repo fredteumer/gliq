@@ -1,0 +1,103 @@
+{# Evidence report — Component C. Rendered to Markdown, stored in pitches.report_md.
+
+   ⚠️ Every untrusted string goes through the `md` filter: pitch titles come from
+   a producer's document and comparable names from the Steam corpus, and an
+   unescaped `|` silently destroys a table row.
+
+   ⚠️ Two things this template must never do: present `differentiation` as part
+   of the grade (it carries weight 0.00), and convert units into revenue.
+
+   ⚠️ Blank lines before tables and headings are LOAD-BEARING — without one a
+   table renders as a paragraph of pipes. Two ways that has already broken here:
+   a Jinja comment placed in the gap (trim_blocks swallows the newline after it),
+   and a trailing block tag on the preceding line (same reason). Where a blank
+   line matters, leave two.
+#}
+# {{ profile.title | md or "Untitled pitch" }}
+
+**{{ recommendation.tier.value | replace("_", "-") | title }}** · Grade **{{ result.grade }}**{% if not result.insufficient_information %} · Score **{{ "%.1f" | format(result.score) }}** / 100{% endif %}
+
+
+| | |
+| :--- | :--- |
+| Pitch ID | `{{ pitch_id }}` |
+| Genre | {{ profile.primary_genre | md or "—" }}{% if profile.sub_genres %} ({{ profile.sub_genres | map("md") | join(", ") }}){% endif %} |
+| Asking price | {{ profile.price_tier.price_point | usd if profile.price_tier else "—" }} |
+| Platforms | {{ profile.target_platforms | map("md") | join(", ") or "—" }} |
+| Extracted by | {{ profile.extracted_by | md }} |
+| Scored | {{ result.scored_at.strftime("%Y-%m-%d %H:%M UTC") }} |
+
+## Recommendation
+
+{{ recommendation.rationale }}
+
+{% if recommendation.de_risk_actions %}
+## What would change this
+
+{% for action in recommendation.de_risk_actions %}
+{{ loop.index }}. {{ action }}
+{% endfor %}
+{% endif %}
+{% if result.insufficient_information %}
+
+## ⛔ Not evaluated
+
+This pitch was **not scored against the market**. No genre and no tags could be
+extracted from the submitted document, so no comparable set exists.
+
+⚠️ This is distinct from a low grade. The system is reporting that it *cannot
+tell*, not that it evaluated the pitch and found it weak — the two warrant very
+different responses, and this one is addressable by resubmitting.
+
+{% if result.missing_fields %}
+Missing required field(s): {{ result.missing_fields | map("md") | join(", ") }}.
+{% endif %}
+{% else %}
+
+## Fitment breakdown
+
+| Signal | Score | Weight |
+| :--- | ---: | :--- |
+| Market hit rate | {{ "%.1f" | format(result.sub_scores.niche_hit_rate) }} | 0.45 |
+| Sales potential | {{ "%.1f" | format(result.sub_scores.sales_potential) }} | 0.35 |
+| Price alignment | {{ "%.1f" | format(result.sub_scores.price_alignment) }} | 0.20 |
+| Differentiation | {{ "%.1f" | format(result.sub_scores.differentiation) }} | **unweighted** |
+
+⚠️ **Differentiation is reported but does not affect the grade.** Validation
+found it carried no signal — winners scored 23.7 against random titles' 23.3 —
+because tags cannot measure how different a game actually is: two roguelike
+deckbuilders can share every tag and be entirely different games.
+{% if closest_similarity is not none %}
+It is shown because the directly checkable version of it is useful: **this pitch's
+{{ closest_sample }} closest comparables average {{ "%.2f" | format(closest_similarity) }} similarity**. Real
+differentiation judgement is not something this system claims to do.
+{% endif %}
+
+{% if result.completeness < 1.0 %}
+⚠️ Only **{{ "%.0f" | format(result.completeness * 100) }}%** of scoring-relevant fields were extracted from the document. Uncapped, this pitch scored **{{ "%.1f" | format(result.uncapped_score) }}**.
+{% endif %}
+
+## Comparable titles
+
+{% if comps %}
+Ranked by similarity to the pitch. {{ comps_total }} title(s) cleared the similarity floor{% if comps_total > comps_shown %}; the closest {{ comps_shown }} are shown{% endif %}.
+
+| # | Title | Released | Price | Reviews | Positive | Est. units | Similarity |
+| ---: | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
+{% for comp in comps %}
+| {{ loop.index }} | {{ comp.name | md }} | {{ comp.release_date | md or "—" }} | {{ comp.price_usd | usd }} | {{ comp.review_count | thousands }} | {{ comp.positive_ratio | percent }} | {{ comp.estimated_units | thousands }} | {{ "%.2f" | format(comp.similarity) }} |
+{% endfor %}
+{% else %}
+No comparable titles cleared the similarity floor.
+{% endif %}
+{% endif %}
+
+## Assumptions and limitations
+
+{% for assumption in assumptions %}
+- {{ assumption }}
+{% endfor %}
+
+---
+
+*Generated {{ recommendation.generated_at.strftime("%Y-%m-%d %H:%M UTC") }} by GreenlightIQ. Every unit figure is an estimate, not audited sales.*
