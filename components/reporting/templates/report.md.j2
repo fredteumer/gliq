@@ -42,12 +42,8 @@
 
 ## Analyst second opinion — {{ advisory.grade }} / {{ advisory.tier.value | replace("_", "-") | title }}
 
-⚠️ **Subjective, and separate from the grade above.** This is an independent read
-from an LLM analyst ({{ advisory.model | md }}) prompted as the acquisitions
-committee. It reads the actual pitch prose the deterministic scorer cannot, and it
-{% if advisory.stance.value == "agrees" %}**agrees** with{% elif advisory.stance.value == "dissents" %}**dissents** from{% else %}**partly departs** from{% endif %}
-the deterministic read. It does **not** change the letter grade — the two verdicts
-stand side by side for a human to weigh.
+{% set stance_phrase = {"agrees": "**agrees** with", "dissents": "**dissents** from", "mixed": "**partly departs** from"}[advisory.stance.value] %}
+⚠️ **Subjective, and separate from the grade above.** This is an independent read from an LLM analyst ({{ advisory.model | md }}) prompted as the acquisitions committee. It reads the actual pitch prose the deterministic scorer cannot, and it {{ stance_phrase }} the deterministic read. It does **not** change the letter grade — the two verdicts stand side by side for a human to weigh.
 
 **Category:** {{ advisory.category | md }}{% if advisory.confidence is not none %} · **Analyst confidence:** {{ "%.0f" | format(advisory.confidence * 100) }}%{% endif %}
 

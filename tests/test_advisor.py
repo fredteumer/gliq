@@ -245,7 +245,24 @@ def test_a_dissenting_opinion_never_overrides_the_deterministic_grade():
     assert "Analyst second opinion — B / Greenlight" in md  # the analyst's own verdict
     assert "separate from the grade above" in md
     assert "does **not** change the letter grade" in md
-    assert "dissents" in md
+    # ⚠️ the stance phrase must keep its spaces — trim_blocks once glued
+    # "dissents from" to the next word ("dissents fromthe deterministic read")
+    assert "**dissents** from the deterministic read" in md
+
+
+def test_each_stance_renders_a_readable_phrase():
+    """agrees/dissents/mixed each read as a whole phrase, not a glued fragment."""
+    prof, res = profile(), result()
+    expect = {
+        AdvisoryStance.AGREES: "**agrees** with the deterministic read",
+        AdvisoryStance.DISSENTS: "**dissents** from the deterministic read",
+        AdvisoryStance.MIXED: "**partly departs** from the deterministic read",
+    }
+    for stance, phrase in expect.items():
+        op = AdvisoryOpinion(category="c", grade="B", tier=InvestmentTier.CONDITIONAL,
+                             rationale="r", stance=stance, model="x")
+        md = render_report("demo", prof, res, recommend(prof, res), op)
+        assert phrase in md, stance
 
 
 def test_no_opinion_omits_the_section_and_leaves_the_report_whole():
