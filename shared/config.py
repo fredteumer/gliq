@@ -55,6 +55,17 @@ class Config:
     admin_password_hash: str
     admin_user: str
 
+    #: Component C's LLM analyst — a subjective second opinion, NOT part of the
+    #: grade. Provider, model and key are all here so the analyst is swappable
+    #: without code changes. `fixture` (the default) returns a canned opinion
+    #: with no key and no network, so an unconfigured stack spends nothing and
+    #: still runs. ➡️ components/reporting/advisor.py
+    advisor_provider: str
+    gemini_api_key: str
+    gemini_model: str
+    anthropic_api_key: str
+    anthropic_model: str
+
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
@@ -84,6 +95,14 @@ class Config:
             session_secret=os.getenv("SESSION_SECRET", ""),
             admin_password_hash=os.getenv("ADMIN_PASSWORD_HASH", ""),
             admin_user=os.getenv("ADMIN_USER", "admin"),
+            # ⚠️ Like LLM_PROVIDER, ADVISOR_PROVIDER is not written to gliq.env by
+            # env-from-stack.py unless configured, so this default IS the VM
+            # config. `fixture` is the safe default: no key, no network, no spend.
+            advisor_provider=os.getenv("ADVISOR_PROVIDER", "fixture"),
+            gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+            gemini_model=os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest"),
+            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+            anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5"),
         )
 
     @property
