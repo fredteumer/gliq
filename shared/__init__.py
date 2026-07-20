@@ -2,6 +2,8 @@
 
 from shared.config import Config
 from shared.schemas import (
+    AdvisoryOpinion,
+    AdvisoryStance,
     Comparable,
     FitmentResult,
     InvestmentTier,
@@ -15,6 +17,8 @@ from shared.schemas import (
 
 __all__ = [
     "Config",
+    "AdvisoryOpinion",
+    "AdvisoryStance",
     "Comparable",
     "FitmentResult",
     "InvestmentTier",

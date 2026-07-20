@@ -296,6 +296,50 @@ class Recommendation(BaseModel):
     generated_at: datetime = Field(default_factory=_now)
 
 
+class AdvisoryStance(StrEnum):
+    """How the LLM analyst's read relates to the deterministic one."""
+
+    AGREES = "agrees"
+    DISSENTS = "dissents"
+    MIXED = "mixed"
+
+
+class AdvisoryOpinion(BaseModel):
+    """An LLM analyst's SUBJECTIVE second opinion. Persisted to `pitches.advisory`.
+
+    ⚠️ This does NOT feed the grade. Component B's fitment score stays fully
+    deterministic — a change in grade must be attributable to extraction or comp
+    selection, never model drift. This is an independent read produced by an LLM
+    prompted as the publisher's investment arm: it reads the raw pitch document,
+    consults the deterministic result, and casts its own vote. It is decision
+    support shown ALONGSIDE the deterministic recommendation, never in place of
+    it, and it is kept in its own column precisely so a human's read and the
+    deterministic read can be pooled with it later.
+
+    ⚠️ `grade` and `tier` here are the ANALYST's, deliberately separate from the
+    deterministic `FitmentResult.grade` / `Recommendation.tier`. They may differ;
+    the difference is the point.
+    """
+
+    #: The analyst's own categorisation of the pitch ("premium 2D metroidvania",
+    #: "crowded F2P shooter", …) — its framing of what kind of bet this is.
+    category: str
+    #: The analyst's subjective grade, A-F. NOT the deterministic grade.
+    grade: str
+    #: The analyst's investment call. NOT the deterministic tier.
+    tier: InvestmentTier
+    rationale: str
+    #: Whether the analyst agrees with, dissents from, or partly departs from the
+    #: deterministic read — surfaced so a human sees the disagreement at a glance.
+    stance: AdvisoryStance
+    key_points: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    #: Provenance — "gemini:gemini-flash-lite-latest", "fixture", etc. Makes a
+    #: future panel of several models poolable without ambiguity about the source.
+    model: str
+    generated_at: datetime = Field(default_factory=_now)
+
+
 # --------------------------------------------------------------------------
 # Messages on the wire
 # --------------------------------------------------------------------------
@@ -306,6 +350,11 @@ class ScoringRequested(BaseModel):
 
     pitch_id: UUID = Field(default_factory=uuid4)
     profile: PitchProfile
+    #: The raw submitted document, carried so B can PERSIST it (never score on
+    #: it) and Component C's LLM analyst can read the prose later. Optional and
+    #: defaulted so a message published before this field existed still
+    #: validates. ➡️ migration 0005, components/reporting/advisor.py
+    document: str | None = None
     requested_at: datetime = Field(default_factory=_now)
 
 
