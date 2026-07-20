@@ -11,6 +11,14 @@ Documentation=https://github.com/fredteumer/gliq
 After=network-online.target
 Wants=network-online.target
 
+# Stop flapping. Without a start limit a component that crashes on boot
+# restarts every 5s forever — an early stub racked up 163 restarts before
+# anyone looked. Five failures inside 5 minutes puts the unit in `failed`,
+# where `systemctl status` reports it plainly instead of burying the cause
+# in a scrolling journal.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=exec
 User=gliq
@@ -27,14 +35,6 @@ ExecStart=/opt/gliq/.venv/bin/uvicorn components.intake.main:app --host 127.0.0.
 
 Restart=on-failure
 RestartSec=5s
-
-# Stop flapping. Without a start limit a component that crashes on boot
-# restarts every 5s forever — an early stub racked up 163 restarts before
-# anyone looked. Five failures inside 5 minutes puts the unit in `failed`,
-# where `systemctl status` reports it plainly instead of burying the cause
-# in a scrolling journal.
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # Hardening. The process needs nothing outside its own directory.
 NoNewPrivileges=true

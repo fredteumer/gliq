@@ -34,6 +34,28 @@ Optional, with defaults:
 | `adminUser` | `admin` | Local account created on every VM for administration. ⚠️ Tailscale SSH maps to the **connecting client's** username, so `ssh <host>` alone looks for a local account named after *you*. Either connect as `ssh admin@<host>`, add a `Host gliq-*` → `User admin` block to `~/.ssh/config`, or set this key to your own username. |
 | `tailscaleTag` | *(unset)* | e.g. `tag:gliq`. ⚠️ An **untagged** key mints nodes that authenticate as the key's owner; under Tailscale's default allow-all ACL such a node can reach every device on the tailnet. Setting a tag scopes them to a machine identity instead. `tailscale up` fails if the key is not authorised for the tag, so mint the key with it. |
 | `topicScoringRequested` etc. | see `index.ts` | Pub/Sub resource names |
+| `enableDatabase` | *(unset → off)* | 💰 Gates the whole Cloud SQL block. Unlike the rest of the stack it bills meaningfully by the hour, so it is opt-in and can be torn down alone: `pulumi config set enableDatabase false && pulumi up`. |
+| `dbPassword` | *(required when enabled)* | 🔒 Set with `--secret`. Encrypted in state, and exported as a secret output so `env-from-stack.py` can put it in the components' `EnvironmentFile`. |
+| `dbTier` | `db-f1-micro` | Cheapest Postgres tier; ample for a ~100k-row corpus. |
+| `dbName` / `dbUser` | `greenlightiq` / `gliq` | |
+
+### 💰 Turning the database on and off
+
+The corpus is fully reproducible from the `data/` ETL and pitch records are disposable during development, so nothing in Postgres is precious. Backups are disabled and `deletionProtection` is off deliberately — both would otherwise obstruct exactly the teardown the credit budget depends on.
+
+```bash
+cd infra
+pulumi config set enableDatabase true
+pulumi config set --secret dbPassword '<pick one>'
+pulumi up
+
+# ...and between sessions:
+pulumi config set enableDatabase false && pulumi up
+```
+
+⚠️ First creation is slow — the servicenetworking peering plus a fresh instance is typically **10–15 minutes**. It is not hung.
+
+⚠️ Reaching it from a laptop needs `tailscale up --accept-routes`: the instance has **no public IP**, so the only path is the `10.10.0.0/24` route `gliq-scoring` advertises to the tailnet.
 
 ## Outline
 
@@ -55,7 +77,11 @@ Optional, with defaults:
 ./infra/scripts/deploy.sh scoring --force    # deploy a dirty tree
 ```
 
-Per node it: installs `rsync` if missing → syncs the tree to `/opt/gliq` → stamps `VERSION` with the commit SHA → installs `/etc/gliq/gliq.env` → optionally installs dependencies → `chown`s to the `gliq` service user → installs the unit file → restarts → prints the last 15 journal lines.
+Once per run, before any node is touched: generates `/etc/gliq/gliq.env` from stack outputs, then applies `alembic upgrade head`.
+
+Per node it: installs `rsync` if missing → syncs the tree to `/opt/gliq` → stamps `VERSION` with the commit SHA → installs the env file → optionally installs dependencies → `chown`s to the `gliq` service user → installs the unit file → restarts → prints the last 15 journal lines.
+
+⚠️ Migrations run **once, from the deploy host — never inside the per-node loop.** Three nodes each running `alembic upgrade head` would race for the same `alembic_version` lock to do identical work. The schema is a property of the database, not of a node; the deploy host reaches Cloud SQL over the tailnet subnet route, while the nodes reach it directly on the VPC and never need Alembic at all (it is in the `etl` extra, not any component's).
 
 | Flag | Effect |
 | :--- | :--- |

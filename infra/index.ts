@@ -21,6 +21,7 @@ import { createMessaging } from "./core/messaging";
 import { createStorage } from "./core/storage";
 import { createSecrets } from "./core/secrets";
 import { createCompute } from "./core/compute";
+import { createDatabase } from "./core/database";
 
 //=============================================================================
 // Configuration
@@ -91,6 +92,25 @@ const compute = createCompute({
     apis,
 });
 
+// 8. Cloud SQL (PostgreSQL) — comps corpus and pitch pipeline records.
+//
+// 💰 Unlike the rest of the stack this bills meaningfully by the hour. It is
+// gated behind `enableDatabase` so a session that is not touching the database
+// can tear it down without unpicking anything:
+//     pulumi config set enableDatabase false && pulumi up
+const database = config.getBoolean("enableDatabase")
+    ? createDatabase({
+          project,
+          region,
+          network: network.network,
+          password: config.requireSecret("dbPassword"),
+          tier: config.get("dbTier") ?? "db-f1-micro",
+          databaseName: config.get("dbName") ?? "greenlightiq",
+          userName: config.get("dbUser") ?? "gliq",
+          apis,
+      })
+    : undefined;
+
 //=============================================================================
 // Outputs — consumed by infra/env-from-stack.py
 //=============================================================================
@@ -124,3 +144,19 @@ export const vmScoringInternalIp = internalIp(compute.scoring);
 export const vmReportInternalIp = internalIp(compute.report);
 /** The subnet B advertises to the tailnet — approve it in the admin console. */
 export const advertisedSubnet = "10.10.0.0/24";
+
+// --- Database ------------------------------------------------------------
+// Empty strings rather than undefined when the database is disabled:
+// env-from-stack.py warns about *missing* outputs, and a warning on every run
+// during the sessions where the database is deliberately off would train the
+// operator to ignore the warnings that matter.
+export const dbHost = database?.privateIp ?? pulumi.output("");
+export const dbName = database ? database.database.name : pulumi.output("");
+export const dbUser = database ? database.user.name : pulumi.output("");
+export const dbInstance = database ? database.instance.name : pulumi.output("");
+// Marked secret by Pulumi (it derives from a secret config value), so it is
+// encrypted in state and redacted from `pulumi stack output` unless
+// --show-secrets is passed. env-from-stack.py passes it: the components need
+// the password, and it is already in state either way — exporting it adds no
+// exposure, it just avoids a second source of truth.
+export const dbPassword = database ? config.requireSecret("dbPassword") : pulumi.output("");

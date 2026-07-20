@@ -39,6 +39,19 @@ REPO_ROOT = INFRA_DIR.parent
 BEGIN = "# --- BEGIN pulumi-managed (infra/env-from-stack.py) — do not edit by hand ---"
 END = "# --- END pulumi-managed ---"
 
+#: Matches a managed block by its *stable prefix* rather than the full marker.
+#:
+#: ⚠️ Matching on the exact BEGIN string is fragile: editing the marker text
+#: orphans every block written by an earlier version. The script then finds no
+#: block, appends a second one, and the file ends up with two — which actually
+#: happened, and was survivable only because dotenv keeps the LAST assignment
+#: and the stale block happened to sit above the new one. A trailing-comment
+#: change must not be able to silently double the file.
+BLOCK_RE = re.compile(
+    r"^# --- BEGIN pulumi-managed.*?^# --- END pulumi-managed ---[^\n]*\n?",
+    re.DOTALL | re.MULTILINE,
+)
+
 #: Stack output name -> environment variable name.
 #:
 #: Keep the right-hand side in sync with ``shared/config.py``. An output that
@@ -54,7 +67,20 @@ OUTPUT_TO_ENV: dict[str, str] = {
     "deadLetterTopic": "PUBSUB_DEAD_LETTER_TOPIC",
     "artifactsBucket": "GCS_ARTIFACTS_BUCKET",
     "intakeStaticIp": "INTAKE_STATIC_IP",
+    # Empty strings when `enableDatabase` is false — see index.ts. The
+    # components fall back to the defaults in shared/config.py, which is the
+    # right behaviour for a session running against a local corpus instead.
+    "dbHost": "DB_HOST",
+    "dbName": "DB_NAME",
+    "dbUser": "DB_USER",
+    "dbPassword": "DB_PASSWORD",
 }
+
+#: Outputs Pulumi marks secret. They are redacted from `pulumi stack output`
+#: unless --show-secrets is passed, and would otherwise be written out as the
+#: literal string "[secret]" — which fails at connect time rather than here,
+#: where it would be obvious.
+SECRET_OUTPUTS = {"dbPassword"}
 
 
 def read_passphrase_from(target: Path) -> str | None:
@@ -73,7 +99,7 @@ def read_passphrase_from(target: Path) -> str | None:
 
 
 def stack_outputs(stack: str | None, env: dict[str, str]) -> dict[str, object]:
-    cmd = ["pulumi", "stack", "output", "--json"]
+    cmd = ["pulumi", "stack", "output", "--json", "--show-secrets"]
     if stack:
         cmd += ["--stack", stack]
     proc = subprocess.run(cmd, cwd=INFRA_DIR, env=env, capture_output=True, text=True)
@@ -96,15 +122,29 @@ def build_block(outputs: dict[str, object]) -> tuple[str, list[str]]:
     return "\n".join(lines), missing
 
 
-def splice(existing: str, block: str) -> str:
-    """Replace the managed block, or append it if not yet present."""
-    pattern = re.compile(
-        re.escape(BEGIN) + r".*?" + re.escape(END),
-        re.DOTALL,
-    )
-    if pattern.search(existing):
-        return pattern.sub(lambda _: block, existing)
-    return f"{existing.rstrip()}\n\n{block}\n" if existing.strip() else f"{block}\n"
+def splice(existing: str, block: str) -> tuple[str, int]:
+    """Replace the managed block, or append it if not yet present.
+
+    Collapses *every* managed block down to one. Returns the new text and the
+    number of pre-existing blocks found, so the caller can report a cleanup.
+    """
+    found = len(BLOCK_RE.findall(existing))
+    if found:
+        # Keep the first block's position — it is usually above any hand-added
+        # values, and dotenv's last-assignment-wins means moving it could
+        # change which value applies. Drop the rest.
+        replaced = [False]
+
+        def _sub(_match: re.Match[str]) -> str:
+            if replaced[0]:
+                return ""
+            replaced[0] = True
+            return block + "\n"
+
+        return BLOCK_RE.sub(_sub, existing), found
+    if existing.strip():
+        return f"{existing.rstrip()}\n\n{block}\n", 0
+    return f"{block}\n", 0
 
 
 def shadowed_outside_block(existing: str, managed: set[str]) -> list[str]:
@@ -113,9 +153,7 @@ def shadowed_outside_block(existing: str, managed: set[str]) -> list[str]:
     dotenv keeps the *last* assignment, so a stray duplicate further down the
     file would silently win over the generated value.
     """
-    without_block = re.sub(
-        re.escape(BEGIN) + r".*?" + re.escape(END), "", existing, flags=re.DOTALL
-    )
+    without_block = BLOCK_RE.sub("", existing)
     found = []
     for line in without_block.splitlines():
         stripped = line.strip()
@@ -145,7 +183,11 @@ def main() -> int:
     parser.add_argument(
         "--no-secrets",
         action="store_true",
-        help="strip local tooling credentials (use when generating for systemd)",
+        help=(
+            "strip local TOOLING credentials (use when generating for systemd). "
+            "Component credentials such as DB_PASSWORD are kept — the services "
+            "cannot run without them; the file is 0640 root:gliq on the VM"
+        ),
     )
     args = parser.parse_args()
 
@@ -176,7 +218,13 @@ def main() -> int:
             file=sys.stderr,
         )
 
-    updated = splice(existing, block)
+    updated, blocks_found = splice(existing, block)
+    if blocks_found > 1:
+        print(
+            f"🧹 collapsed {blocks_found} managed blocks into 1 — the extras were "
+            "written by an older marker format and were shadowing each other",
+            file=sys.stderr,
+        )
 
     if args.no_secrets:
         updated = "\n".join(

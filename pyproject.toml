@@ -35,6 +35,10 @@ reporting = [
 ]
 etl = [
     "psycopg[binary]>=3.1",
+    # Schema migrations. An OPS dependency, not a runtime one — it pulls in
+    # SQLAlchemy, which the components themselves never use (they speak
+    # psycopg directly). Kept out of the component extras to keep the VMs lean.
+    "alembic>=1.13",
     "pandas>=2.2",
     "httpx>=0.27",
 ]

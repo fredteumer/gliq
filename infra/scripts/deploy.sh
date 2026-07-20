@@ -53,6 +53,7 @@ ALL_COMPONENTS=(intake scoring reporting)
 
 INSTALL_DEPS=0
 FORCE=0
+SKIP_MIGRATIONS=0
 TARGETS=()
 
 #-----------------------------------------------------------------------------
@@ -61,12 +62,17 @@ TARGETS=()
 
 usage() {
     cat <<EOF
-Usage: $(basename "$0") <intake|scoring|reporting|report|all> [--deps] [--force]
+Usage: $(basename "$0") <intake|scoring|reporting|report|all> [--deps] [--force] [--no-migrate]
 
   --deps    Create the venv if absent and (re)install that component's extras.
             Off by default: dependency installs are slow and rarely change,
             and paying that cost on every deploy would defeat the point.
   --force   Deploy a dirty working tree. VERSION is stamped '<sha>-dirty'.
+  --no-migrate
+            Skip 'alembic upgrade head'. Migrations otherwise run once,
+            before any node is touched.
+            (Single quotes, not backticks: this heredoc is unquoted so that
+            \$(basename) expands, which means backticks would execute too.)
 EOF
 }
 
@@ -77,6 +83,7 @@ while [ $# -gt 0 ]; do
         report)             TARGETS+=(reporting) ;;   # accept the VM's name too
         --deps)             INSTALL_DEPS=1 ;;
         --force)            FORCE=1 ;;
+        --no-migrate)       SKIP_MIGRATIONS=1 ;;
         -h|--help)          usage; exit 0 ;;
         *)                  echo "❌ Unknown argument: $1"; usage; exit 1 ;;
     esac
@@ -127,6 +134,48 @@ else
     echo "⚠️ Could not generate the env file from the Pulumi stack."
     echo "   Units will fail to start without /etc/gliq/gliq.env."
     rm -f "${ENV_FILE}"
+fi
+
+#-----------------------------------------------------------------------------
+# Schema migrations
+#-----------------------------------------------------------------------------
+# `alembic upgrade head` compares the alembic_version table against the
+# migration chain and applies only what is missing — idempotent, so running it
+# on every deploy is safe.
+#
+# ⚠️ ONCE, here, before the per-node loop — NOT inside deploy_one(). Three nodes
+# each running migrations would race for the same alembic_version lock to do
+# identical work. Migrations are a property of the database, not of a node.
+#
+# Run from the deploy host, which reaches Cloud SQL over the tailnet subnet
+# route (`tailscale up --accept-routes`). The nodes reach it directly on the
+# VPC and never need Alembic — it is not in any component's extras.
+
+if [ "${SKIP_MIGRATIONS}" -eq 1 ]; then
+    echo "⏸️ Skipping migrations (--no-migrate)"
+elif ! grep -q '^DB_HOST=.\+' .env 2>/dev/null; then
+    echo "⏸️ Skipping migrations — DB_HOST is empty (enableDatabase is off)"
+else
+    ALEMBIC=""
+    for candidate in .venv-etl/bin/alembic .venv/bin/alembic "$(command -v alembic || true)"; do
+        [ -x "${candidate}" ] && { ALEMBIC="${candidate}"; break; }
+    done
+
+    if [ -z "${ALEMBIC}" ]; then
+        echo "🛑 alembic not found — install it with:"
+        echo "     python3 -m venv .venv-etl && .venv-etl/bin/pip install -e '.[etl]'"
+        echo "   or re-run with --no-migrate to deploy code without touching the schema."
+        exit 1
+    fi
+
+    echo "🗄️ Applying schema migrations..."
+    "${ALEMBIC}" upgrade head || {
+        # Deploying code against a schema it does not match is how you get
+        # errors far away from their cause.
+        echo "❌ Migration failed — refusing to deploy code against a stale schema"
+        exit 1
+    }
+    echo "✅ Schema at head"
 fi
 
 #-----------------------------------------------------------------------------

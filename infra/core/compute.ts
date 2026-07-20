@@ -13,11 +13,19 @@
  *
  * ## Subnet routing
  *
- * B advertises `10.10.0.0/24` to the tailnet. This is NOT needed to SSH to the
+ * B advertises TWO ranges to the tailnet: `10.10.0.0/24` (the component subnet)
+ * and `10.20.0.0/16` (private services access). This is NOT needed to SSH to the
  * VMs — every node runs `tailscaled` and is directly addressable. It exists for
  * the *managed* services: Cloud SQL and Memorystore cannot run a Tailscale
- * agent, and will only ever have private IPs inside this subnet. Without an
- * advertised route, `psql` and `redis-cli` from a laptop cannot reach them.
+ * agent. Without an advertised route, `psql` and `redis-cli` from a laptop
+ * cannot reach them.
+ *
+ * ⚠️ Managed instances do NOT get addresses in the component subnet — they live
+ * in Google's service producer network, reached across the VPC peering, and
+ * allocate from the peering range instead. Advertising only the subnet leaves
+ * the database silently unreachable: `ip route get <db>` shows traffic heading
+ * for the default gateway and `psql` simply hangs. Both constants live together
+ * in networking.ts so they cannot drift apart.
  *
  * B is the advertiser because B is the component that talks to both, so a B
  * outage already means a broken pipeline. Grove uses a dedicated e2-micro for
@@ -33,7 +41,13 @@ import * as gcp from "@pulumi/gcp";
 import * as pulumi from "@pulumi/pulumi";
 import { EnabledApis } from "./apis";
 import { ComponentAccounts } from "./iam";
-import { NetworkingResources, SUBNET_CIDR, TAG_INTERNAL, TAG_PUBLIC } from "./networking";
+import {
+    NetworkingResources,
+    SUBNET_CIDR,
+    SERVICES_PEERING_CIDR,
+    TAG_INTERNAL,
+    TAG_PUBLIC,
+} from "./networking";
 import { SecretResources } from "./secrets";
 
 export interface ComputeResources {
@@ -181,8 +195,11 @@ export function createCompute(args: ComputeArgs): ComputeResources {
             // fail to carry traffic.
             canIpForward: true,
             metadata: {
+                // Both ranges: the component subnet, and the private services
+                // range where Cloud SQL and Memorystore live. Advertising only
+                // the former leaves the database unreachable from the tailnet.
                 "startup-script": startupScript("gliq-scoring", [
-                    `--advertise-routes=${SUBNET_CIDR}`,
+                    `--advertise-routes=${SUBNET_CIDR},${SERVICES_PEERING_CIDR}`,
                 ]),
             },
             serviceAccount: {

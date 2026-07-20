@@ -20,6 +20,18 @@ export const TAG_INTERNAL = "gliq-internal";
 /** The subnet every component lives in. Advertised to the tailnet by B. */
 export const SUBNET_CIDR = "10.10.0.0/24";
 
+/**
+ * The range reserved for Google's private services access — where Cloud SQL
+ * (and later Memorystore) actually allocate their private IPs.
+ *
+ * ⚠️ This is NOT part of SUBNET_CIDR. Managed instances live in Google's
+ * producer network and are reached across the VPC peering, so a tailnet client
+ * that only has a route for 10.10.0.0/24 cannot reach the database at all —
+ * `psql` just hangs off toward the default gateway. B advertises both ranges
+ * for that reason. Kept here, next to the subnet, so the two cannot drift.
+ */
+export const SERVICES_PEERING_CIDR = "10.20.0.0/16";
+
 export interface NetworkingResources {
     network: gcp.compute.Network;
     subnet: gcp.compute.Subnetwork;
