@@ -66,7 +66,13 @@ class Config:
             redis_host=os.getenv("REDIS_HOST", "127.0.0.1"),
             redis_port=int(os.getenv("REDIS_PORT", "6379")),
             cache_ttl_seconds=int(os.getenv("CACHE_TTL_SECONDS", "3600")),
-            llm_provider=os.getenv("LLM_PROVIDER", "fixture"),
+            # ⚠️ This default is load-bearing. LLM_PROVIDER is NOT among the
+            # variables `infra/env-from-stack.py` writes to /etc/gliq/gliq.env,
+            # so on the VMs the fallback here IS the configuration. It must be a
+            # provider that extracts the submitted document: `fixture` returns a
+            # canned profile regardless of input, so leaving it as the default
+            # would silently score every real pitch as the same fixture game.
+            llm_provider=os.getenv("LLM_PROVIDER", "deterministic"),
         )
 
     @property
