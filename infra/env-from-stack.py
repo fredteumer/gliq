@@ -80,6 +80,12 @@ OUTPUT_TO_ENV: dict[str, str] = {
     # leaving it open.
     "sessionSecret": "SESSION_SECRET",
     "adminPasswordHash": "ADMIN_PASSWORD_HASH",
+    # Component C's LLM analyst. Empty until configured; the analyst degrades to
+    # None with an empty key, so an unconfigured stack reports deterministically
+    # and spends nothing. ➡️ components/reporting/advisor.py
+    "advisorProvider": "ADVISOR_PROVIDER",
+    "geminiApiKey": "GEMINI_API_KEY",
+    "anthropicApiKey": "ANTHROPIC_API_KEY",
 }
 
 #: Outputs Pulumi marks secret. They are redacted from `pulumi stack output`

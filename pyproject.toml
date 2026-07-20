@@ -42,6 +42,12 @@ reporting = [
     "google-cloud-pubsub>=2.21",
     "psycopg[binary]>=3.1",
     "jinja2>=3.1",
+    # --- the LLM analyst (components/reporting/advisor.py) ---
+    # `openai` drives the Gemini path via its OpenAI-compatible endpoint;
+    # `anthropic` is the alternate provider. Neither is imported unless the
+    # matching ADVISOR_PROVIDER is selected — the fixture default needs neither.
+    "openai>=1.40",
+    "anthropic>=0.69",
 ]
 etl = [
     "psycopg[binary]>=3.1",

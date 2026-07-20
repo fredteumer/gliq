@@ -169,3 +169,13 @@ export const dbPassword = database ? config.requireSecret("dbPassword") : pulumi
 //   pulumi config set --secret adminPasswordHash  '<from infra/scripts/hash-password.py>'
 export const sessionSecret = config.getSecret("sessionSecret") ?? pulumi.output("");
 export const adminPasswordHash = config.getSecret("adminPasswordHash") ?? pulumi.output("");
+
+// Component C's LLM analyst. All optional so a stack that hasn't configured it
+// still deploys — an empty key makes the analyst degrade to None, and the
+// deterministic report renders regardless.
+//
+//   pulumi config set advisorProvider gemini
+//   pulumi config set --secret geminiApiKey '<key>'
+export const advisorProvider = config.get("advisorProvider") ?? "fixture";
+export const geminiApiKey = config.getSecret("geminiApiKey") ?? pulumi.output("");
+export const anthropicApiKey = config.getSecret("anthropicApiKey") ?? pulumi.output("");
