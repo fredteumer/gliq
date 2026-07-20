@@ -68,6 +68,46 @@ GENRES_SQL = """
     ORDER BY n DESC, value
 """
 
+#: Per-tag genre affinity: of the titles carrying tag T, what share sit in
+#: genre G.
+#:
+#: This exists because genre words seldom appear literally in a design
+#: document. "A free-to-play 100-player battle royale shooter" names no Steam
+#: genre at all — `Shooter` and `Battle Royale` are TAGS — so a literal genre
+#: match finds nothing and `primary_genre` comes back empty, which is a
+#: load-bearing field and hard-caps the grade at D.
+#:
+#: The corpus already knows the answer: 92% of `Shooter` titles are filed under
+#: Action, 83% of `Battle Royale` titles likewise. Baking that mapping in here
+#: keeps the inference DERIVED FROM DATA rather than a hand-written table of
+#: someone's assumptions, and keeps it out of the runtime — the extractor needs
+#: no database to use it.
+AFFINITY_SQL = """
+    WITH tag_totals AS (
+        SELECT t AS tag, count(*) AS n
+        FROM steam_titles, unnest(tags) t
+        GROUP BY t
+        HAVING count(*) >= %(min_count)s
+    ),
+    pairs AS (
+        SELECT t AS tag, g AS genre, count(*) AS n
+        FROM steam_titles, unnest(tags) t, unnest(genres) g
+        GROUP BY t, g
+    )
+    SELECT p.tag, p.genre, p.n::float / tt.n AS share
+    FROM pairs p JOIN tag_totals tt USING (tag)
+    WHERE p.n::float / tt.n >= %(floor)s
+    ORDER BY p.tag, share DESC
+"""
+
+#: Below this share the association is noise rather than a signal. 0.25 keeps
+#: `Metroidvania -> RPG` (26%) and drops the long tail of incidental genres.
+AFFINITY_FLOOR = 0.25
+
+#: How many genres to keep per tag. Corpus titles carry 2-3 genres, so four
+#: candidates is already more than any single title has.
+AFFINITY_TOP_N = 4
+
 #: Steam reports exactly these three. Not a query: `platforms` is a fixed set
 #: written by load_corpus.py, and a pitch naming "Nintendo Switch" or "consoles"
 #: has nowhere to land — the extractor maps what it can onto these and drops the
@@ -84,6 +124,18 @@ def fetch(conn: psycopg.Connection, sql: str, min_count: int) -> list[dict[str, 
     with conn.cursor() as cur:
         cur.execute(sql, {"min_count": min_count})
         return [{"value": value, "count": n} for value, n in cur.fetchall()]
+
+
+def fetch_affinity(conn: psycopg.Connection, min_count: int) -> dict[str, list[dict[str, object]]]:
+    """Tag -> its top genres by co-occurrence share, most associated first."""
+    affinity: dict[str, list[dict[str, object]]] = {}
+    with conn.cursor() as cur:
+        cur.execute(AFFINITY_SQL, {"min_count": min_count, "floor": AFFINITY_FLOOR})
+        for tag, genre, share in cur.fetchall():
+            entries = affinity.setdefault(tag, [])
+            if len(entries) < AFFINITY_TOP_N:
+                entries.append({"genre": genre, "share": round(float(share), 3)})
+    return affinity
 
 
 def main() -> int:
@@ -109,6 +161,7 @@ def main() -> int:
             tags = fetch(conn, TAGS_SQL, args.min_count)
             genres = fetch(conn, GENRES_SQL, args.min_count)
             platforms = fetch(conn, PLATFORMS_SQL, 1)
+            affinity = fetch_affinity(conn, args.min_count)
     except psycopg.OperationalError as exc:
         print(f"❌ could not reach Cloud SQL at {config.db_host}: {exc}", file=sys.stderr)
         print("   Reaching it from a laptop needs `tailscale up --accept-routes`.", file=sys.stderr)
@@ -120,6 +173,7 @@ def main() -> int:
 
     print(f"✅ {titles:,} titles")
     print(f"✅ {len(tags):,} tags, {len(genres):,} genres, {len(platforms)} platforms")
+    print(f"✅ genre affinity for {len(affinity):,} tags (share >= {AFFINITY_FLOOR:.0%})")
     if args.min_count > 1:
         print(f"⚠️ entries occurring in fewer than {args.min_count} titles were dropped")
 
@@ -131,9 +185,11 @@ def main() -> int:
         ),
         "corpus_titles": titles,
         "min_count": args.min_count,
+        "affinity_floor": AFFINITY_FLOOR,
         "tags": tags,
         "genres": genres,
         "platforms": platforms,
+        "genre_affinity": affinity,
     }
 
     if args.dry_run:
