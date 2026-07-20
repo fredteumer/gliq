@@ -1,0 +1,41 @@
+# Component C — gliq-report
+#
+# No inbound endpoint. Pulls from the scoring-completed subscription, renders
+# the recommendation and evidence report, persists and notifies.
+#
+# Note the name asymmetry: the unit and VM are `gliq-report`, the Python
+# package is `components/reporting/`. deploy.sh maps between them.
+#
+# Installed to /etc/systemd/system/ by infra/scripts/deploy.sh.
+
+[Unit]
+Description=GreenlightIQ Component C (reporting)
+Documentation=https://github.com/fredteumer/gliq
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=gliq
+Group=gliq
+WorkingDirectory=/opt/gliq
+
+EnvironmentFile=/etc/gliq/gliq.env
+
+ExecStart=/opt/gliq/.venv/bin/python -m components.reporting.main
+
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/gliq
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gliq-report
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,218 @@
+#!/bin/bash
+#
+# GreenlightIQ component deploy.
+#
+# Pushes the working tree to /opt/gliq on one or all component VMs over the
+# tailnet, then restarts the systemd unit and shows the first lines of its log.
+#
+#   ./infra/scripts/deploy.sh all
+#   ./infra/scripts/deploy.sh intake --deps
+#   ./infra/scripts/deploy.sh scoring --force
+#
+# This is the project's "CD": there is no pipeline pushing to these hosts. The
+# VMs are tailnet-only with public SSH closed, so a hosted runner would need a
+# Tailscale auth key of its own — deliberately avoided. See docs/DEPLOYMENT.md.
+#
+# ⚠️ What lands on the VM is the WORKING TREE, not a pushed commit. The clean
+# tree check below is what keeps "what is deployed" answerable; --force skips
+# it and marks VERSION accordingly.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "${REPO_ROOT}"
+
+REMOTE_DIR="/opt/gliq"
+VENV="${REMOTE_DIR}/.venv"
+
+# One SSH connection per node, reused by every command and by rsync/scp.
+#
+# A deploy makes roughly eight round trips per node. Without multiplexing each
+# one is a separate authentication — which is slow, and matters more than that
+# if the tailnet's SSH policy is in check mode: every connection can block on
+# an interactive browser check, so a lapsed check period could strand a deploy
+# after rsync but before the chown, leaving files the `gliq` user cannot read.
+# Multiplexing collapses that to a single auth event per node per deploy.
+SSH_CTL_DIR="$(mktemp -d)"
+SSH_OPTS=(
+    -o ControlMaster=auto
+    -o "ControlPath=${SSH_CTL_DIR}/%r@%h:%p"
+    -o ControlPersist=60s
+    -o ConnectTimeout=10
+)
+trap 'rm -rf "${SSH_CTL_DIR}"' EXIT
+
+ssh_do()  { ssh "${SSH_OPTS[@]}" "$@"; }
+scp_do()  { scp "${SSH_OPTS[@]}" "$@"; }
+
+# Component name -> VM hostname. The names differ on purpose: the package is
+# `reporting` (it reports) while the node is `gliq-report`. Keep the mapping
+# here rather than papering over it at either end.
+declare -A VM_OF=( [intake]=gliq-intake  [scoring]=gliq-scoring  [reporting]=gliq-report )
+ALL_COMPONENTS=(intake scoring reporting)
+
+INSTALL_DEPS=0
+FORCE=0
+TARGETS=()
+
+#-----------------------------------------------------------------------------
+# Arguments
+#-----------------------------------------------------------------------------
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") <intake|scoring|reporting|report|all> [--deps] [--force]
+
+  --deps    Create the venv if absent and (re)install that component's extras.
+            Off by default: dependency installs are slow and rarely change,
+            and paying that cost on every deploy would defeat the point.
+  --force   Deploy a dirty working tree. VERSION is stamped '<sha>-dirty'.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        all)                TARGETS=("${ALL_COMPONENTS[@]}") ;;
+        intake|scoring|reporting) TARGETS+=("$1") ;;
+        report)             TARGETS+=(reporting) ;;   # accept the VM's name too
+        --deps)             INSTALL_DEPS=1 ;;
+        --force)            FORCE=1 ;;
+        -h|--help)          usage; exit 0 ;;
+        *)                  echo "❌ Unknown argument: $1"; usage; exit 1 ;;
+    esac
+    shift
+done
+
+if [ ${#TARGETS[@]} -eq 0 ]; then
+    echo "❌ No component specified"
+    usage
+    exit 1
+fi
+
+#-----------------------------------------------------------------------------
+# Provenance
+#-----------------------------------------------------------------------------
+
+SHA="$(git rev-parse --short HEAD)"
+
+if [ -n "$(git status --porcelain)" ]; then
+    if [ "${FORCE}" -eq 0 ]; then
+        echo "🛑 Working tree is dirty — refusing to deploy."
+        echo "   What runs on the VM would not correspond to any commit."
+        git status --short | sed 's/^/     /'
+        echo "   Commit, stash, or re-run with --force."
+        exit 1
+    fi
+    echo "⚠️ Deploying a DIRTY tree (--force) — VERSION will be marked accordingly"
+    SHA="${SHA}-dirty"
+fi
+
+STAMP="$(date -Is)"
+echo "🚀 Deploying ${SHA} to: ${TARGETS[*]}"
+
+#-----------------------------------------------------------------------------
+# Deploy
+#-----------------------------------------------------------------------------
+# rsync as root: /opt/gliq is owned by the unprivileged `gliq` service user, so
+# the transfer needs write access it does not have, and ownership is restored
+# immediately after. Tailscale SSH authenticates this at the tailnet layer.
+
+deploy_one() {
+    local component="$1"
+    local vm="${VM_OF[$component]}"
+
+    echo ""
+    echo "───────────────────────────────────────────────"
+    echo "📦 ${component} → ${vm}"
+    echo "───────────────────────────────────────────────"
+
+    if ! ssh_do "root@${vm}" true 2>/dev/null; then
+        echo "❌ ${vm} is unreachable over the tailnet"
+        echo "   Is the VM up? \`tailscale status\` / \`pulumi up\`"
+        return 1
+    fi
+
+    # --delete so a file removed locally is removed on the VM. Without it a
+    # renamed module leaves its old copy behind and can still be imported.
+    # infra/ is excluded: Pulumi and node_modules have no business on a node.
+    echo "📤 Syncing..."
+    rsync -a --delete --compress \
+        -e "ssh ${SSH_OPTS[*]}" \
+        --exclude '.git/' \
+        --exclude 'infra/' \
+        --exclude '__pycache__/' \
+        --exclude '*.pyc' \
+        --exclude '.venv/' \
+        --exclude '.env' \
+        --exclude 'node_modules/' \
+        --exclude '.pytest_cache/' \
+        --exclude '*.egg-info/' \
+        --exclude 'WIP*.md' \
+        ./ "root@${vm}:${REMOTE_DIR}/"
+
+    ssh_do "root@${vm}" "printf '%s\n%s\n' '${SHA}' '${STAMP}' > ${REMOTE_DIR}/VERSION"
+
+    # Dependencies, only on request.
+    if [ "${INSTALL_DEPS}" -eq 1 ]; then
+        echo "📦 Installing ${component} dependencies..."
+        ssh_do "root@${vm}" "
+            set -e
+            if [ ! -d ${VENV} ]; then
+                echo '   creating venv at ${VENV}'
+                python3 -m venv ${VENV}
+            fi
+            ${VENV}/bin/pip install --quiet --upgrade pip
+            ${VENV}/bin/pip install --quiet -e '${REMOTE_DIR}[${component}]'
+        "
+        echo "✅ Dependencies installed"
+    elif ! ssh_do "root@${vm}" "[ -x ${VENV}/bin/python ]"; then
+        # Bootstrap does not create the venv, so a first deploy to a fresh node
+        # will land here. Fail loudly rather than creating it silently — a
+        # missing venv can also mean a half-provisioned VM, and quietly fixing
+        # it would hide that.
+        echo "🛑 No venv at ${VENV} — re-run with --deps to create it"
+        return 1
+    fi
+
+    # Ownership last: everything above ran as root and would otherwise leave
+    # root-owned files that the `gliq` service user cannot read.
+    ssh_do "root@${vm}" "chown -R gliq:gliq ${REMOTE_DIR}"
+
+    # Install/refresh the unit file, then restart.
+    local unit="gliq-${component}"
+    [ "${component}" = "reporting" ] && unit="gliq-report"
+
+    echo "🔧 Installing ${unit}.service..."
+    scp_do -q "infra/systemd/${unit}.service" "root@${vm}:/etc/systemd/system/${unit}.service"
+    ssh_do "root@${vm}" "systemctl daemon-reload && systemctl enable --quiet ${unit} 2>/dev/null || true"
+
+    echo "🔧 Restarting ${unit}..."
+    ssh_do "root@${vm}" "systemctl restart ${unit}" || true
+
+    # Show the outcome here rather than making the operator SSH in to find out.
+    sleep 2
+    echo ""
+    ssh_do "root@${vm}" "systemctl is-active --quiet ${unit}" \
+        && echo "✅ ${unit} is active" \
+        || echo "⚠️ ${unit} is not active — recent log:"
+    ssh_do "root@${vm}" "journalctl -u ${unit} -n 15 --no-pager -o cat" | sed 's/^/     /'
+}
+
+FAILED=()
+for component in "${TARGETS[@]}"; do
+    deploy_one "${component}" || FAILED+=("${component}")
+done
+
+#-----------------------------------------------------------------------------
+# Summary
+#-----------------------------------------------------------------------------
+
+echo ""
+echo "───────────────────────────────────────────────"
+if [ ${#FAILED[@]} -eq 0 ]; then
+    echo "✅ Deployed ${SHA} to ${#TARGETS[@]} node(s) at ${STAMP}"
+else
+    echo "❌ Failed on: ${FAILED[*]}"
+    echo "✅ Succeeded on $(( ${#TARGETS[@]} - ${#FAILED[@]} )) of ${#TARGETS[@]} node(s)"
+    exit 1
+fi

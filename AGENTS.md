@@ -129,6 +129,16 @@ DONE IN SESSION:
 
 A WIP is a **handoff, not a journal**. Scratch notes during a session are fine; before closing out, collapse to the above. Move durable architecture and decisions into `AGENTS.md` or `docs/` rather than letting them accrete in WIP files — a decision recorded only in a gitignored file is a decision that is lost.
 
+## 🎯 Plan before multi-step work
+
+**Anything that is not a single obvious edit gets a plan first.** Use the agent's plan mode where it exists (Claude Code: plan mode / `ExitPlanMode`); otherwise write the plan into the response before touching a file.
+
+Plan when the work: touches more than one file or component, provisions or changes cloud resources, changes a schema in `shared/`, alters deployment or systemd, or is described in more than one sentence by the user. Skip the plan for a typo, a one-line fix, or a read-only question.
+
+A plan states 🎯 the goal, the ordered steps with the files each touches, ⚠️ anything that could conflict with the [hard constraints](#-hard-constraints--read-before-proposing-any-architecture) or spend credits, and what "done" looks like. **Get agreement on the plan before executing it** — a wrong plan is cheap, a wrong `pulumi up` is not.
+
+For a plan spanning more than one session, land it in the WIP file's `TODO:` block so the next session inherits it.
+
 ## ⚠️ Git
 
 - **DO NOT HANDLE GIT OPERATIONS.** That is the user's responsibility.

@@ -1,0 +1,43 @@
+# Component A — gliq-intake
+#
+# The only publicly reachable component. Runs uvicorn on loopback; nginx
+# terminates TLS for greenlightiq.fredt.io and proxies to it.
+#
+# Installed to /etc/systemd/system/ by infra/scripts/deploy.sh.
+
+[Unit]
+Description=GreenlightIQ Component A (intake)
+Documentation=https://github.com/fredteumer/gliq
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=gliq
+Group=gliq
+WorkingDirectory=/opt/gliq
+
+# Generated from Pulumi stack outputs:
+#   python3 infra/env-from-stack.py --target /etc/gliq/gliq.env --no-secrets
+EnvironmentFile=/etc/gliq/gliq.env
+
+# Bound to loopback deliberately: the public path is nginx, and binding
+# 0.0.0.0 would expose uvicorn directly on the VM's external IP.
+ExecStart=/opt/gliq/.venv/bin/uvicorn components.intake.main:app --host 127.0.0.1 --port 8000
+
+Restart=on-failure
+RestartSec=5s
+
+# Hardening. The process needs nothing outside its own directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/gliq
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gliq-intake
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,38 @@
+# Component B — gliq-scoring
+#
+# No inbound endpoint. Pulls from the scoring-requested subscription, so it
+# needs no public IP and no load balancer.
+#
+# Installed to /etc/systemd/system/ by infra/scripts/deploy.sh.
+
+[Unit]
+Description=GreenlightIQ Component B (scoring)
+Documentation=https://github.com/fredteumer/gliq
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=gliq
+Group=gliq
+WorkingDirectory=/opt/gliq
+
+EnvironmentFile=/etc/gliq/gliq.env
+
+ExecStart=/opt/gliq/.venv/bin/python -m components.scoring.main
+
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/gliq
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gliq-scoring
+
+[Install]
+WantedBy=multi-user.target

@@ -45,6 +45,31 @@ Optional, with defaults:
 5. **Expose Component A** — nginx + certbot on the intake VM, serving `greenlightiq.fredt.io`.
 6. **Verify** — submit a sample pitch from `samples/` and follow it through `journalctl` on all three VMs.
 
+## 🔧 Changing the VM bootstrap
+
+The startup script lives in `metadata["startup-script"]`, **not** the `metadataStartupScript` convenience field — the latter is ForceNew, so every edit would destroy and recreate all three VMs.
+
+The tradeoff is that edits no longer self-apply. `pulumi up` writes the new metadata but executes nothing; GCE only runs the script on boot. So it is always two steps:
+
+```bash
+cd infra && pulumi up
+for vm in gliq-intake gliq-scoring gliq-report; do
+    ssh root@$vm 'google_metadata_script_runner startup'
+done
+```
+
+`google_metadata_script_runner startup` re-runs it without a reboot. The script is idempotent (guarded `useradd`, `install -d`, `grep` before appending to `.bashrc`), so repeat runs are safe.
+
+Verify by reading the boot log rather than assuming — every phase is marked, and a failure shows exactly which one:
+
+```bash
+ssh root@gliq-intake 'tail -40 /var/log/gliq-startup.log'
+# or, before the node is reachable at all:
+gcloud compute instances get-serial-port-output gliq-intake --zone=us-central1-a
+```
+
+⚠️ **Connectivity probes:** the readiness loop uses `curl -f`, which exits non-zero on **any** HTTP status ≥ 400. Probing a URL that 404s on `/` therefore never succeeds regardless of network health — that mistake silently failed every node's first boot while reporting "network not ready". Probe something that returns 200.
+
 ## ⚠️ Teardown
 
 `pulumi destroy` removes everything. Run it once evidence is captured.
